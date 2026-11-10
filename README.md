@@ -16,7 +16,7 @@ WASD moves; hold Space for bunny hops; tap Shift before landing for slide boosts
 
 Normal browsers use Pointer Lock. Embedded browsers that reject it use relative cursor movement plus continuous horizontal turning near the screen edges. M retries pointer lock. Fullscreen is available when supported by the browser.
 
-All three play options use free-for-all scoring, hitscan, headshot bonuses, streak tracking, brief spawn protection, and delayed health regeneration. Vs AI runs locally against five bots. Its optional aim practice difficulty disables bot movement and fire.
+All three play options support Free-for-all and Team Deathmatch. They share hitscan, headshot bonuses, streak tracking, brief spawn protection, and delayed health regeneration. Vs AI runs locally with five bots. Its optional aim practice difficulty disables bot movement and fire.
 
 ## Source layout
 
@@ -45,13 +45,17 @@ The lobby map selector previews the chosen arena live and remembers the selectio
 
 ## Play options
 
-- **Public Online** starts Quick Play. New guests join a live public match with room when one is available. A new match starts with bots immediately when a seat is unavailable. Public rounds are three minutes at regular difficulty.
+- **Public Online** starts Quick Play. New guests join a live public match with room when one is available. A new match starts with bots immediately when a seat is unavailable. Public rounds are three minutes at regular difficulty. Free-for-all and 4v4 Team Deathmatch use separate matchmaking pools.
 - **Vs AI** runs offline. Choose your starting arena, round length, and bot difficulty before playing.
-- **Custom Rooms** uses an eight-character invite code or link. The creator chooses the starting arena, round length, and bot difficulty.
+- **Custom Rooms** uses an eight-character invite code or link. The creator chooses the starting arena and can expand **Customize room** to set the game rules, round length, slots, bot count and difficulty, kill limit, and respawn delay. Team Deathmatch also offers friendly fire and Humans vs Bots.
 
-Online rooms hold eight players including bots. Humans replace bots. A dropped connection has a 15-second grace period. Quick Play tries to reconnect you to your assigned match before looking for a new one.
+Public rooms hold eight players including bots. Custom rooms have two to eight total slots, with an even cap in Team Deathmatch. Humans take priority over bots. A dropped connection has a 15-second grace period. Quick Play tries to reconnect you to your assigned match before looking for a new one.
 
 Every mode shows standings and a 15-second map vote. You can change your vote and pick the next round's primary. If nobody votes, the arenas rotate. Online ties are randomized among the leaders. The next round starts automatically, keeping both online connections and custom invite codes.
+
+In Team Deathmatch, an enemy elimination adds one to the team's score. The highest team score wins when time expires, or a team can win early by reaching the kill limit. Public TDM and Vs AI default to 30 kills with friendly fire off. Vs AI plays 3v3. In mixed custom TDM, players can request a team for the next round, subject to available space. Humans vs Bots puts players on Blue and bots on Red.
+
+Custom hosts can open **Esc → Host controls** during play or open the same controls on the results screen. Queued settings apply after map voting, keeping the same room and invite. The server rejects a new cap that would displace a connected or reconnecting player. Set bots to **0** for human-only matches, **Fill open slots** for automatic backfill, or a fixed maximum. Choose one skill for the room, random skills, or overrides for named bots.
 
 Run `npm install` then `npm run dev` for the full local Worker and matchmaking service. Open the printed localhost URL.
 
@@ -65,5 +69,7 @@ The existing Cloudflare Pages frontend connects to `witty-warfare-online.ejwit00
 ## Staying in the room
 
 Press Esc during a match to choose any of the six primaries. The choice applies on the next respawn, or use Respawn with [weapon] to equip immediately at the cost of one death. Scores and room identity remain intact. A pistol and knife are included after every change. The results screen also allows choosing the next round's primary while voting for a map. Room codes and invite links remain the same across all rounds.
+
+Use `node tests/tdm.integration.mjs` to verify the separate public queues, custom permissions, and queued room changes through a complete round.
 
 To exercise the complete two-player loop on a running server, use `node tests/room-round.integration.mjs` (takes one two-minute round plus the 15-second vote). It checks queued and immediate loadouts, changed votes, automatic map rotation, the same room/WebSockets, and loadouts retained into the next round.

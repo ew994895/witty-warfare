@@ -36,3 +36,25 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 #voteProgress::-webkit-progress-value{background:var(--yellow)}
 #mouseNotice{pointer-events:auto;cursor:auto}
 #captureMouse{padding:3px 6px;background:#213229;border:1px solid #a6b993;color:var(--yellow);font:inherit;cursor:pointer}
+
+#playlist{width:100%;margin-bottom:3px}
+.room-options,.live-room-options{margin-top:12px;color:#d9e6d4;text-align:left}
+.room-options summary{cursor:pointer;font-size:12px;font-weight:700;padding:9px 10px;border:1px solid #81966f60;border-radius:3px;background:#1d2c25}
+.room-options[open]>summary{color:var(--yellow);margin-bottom:9px}
+.room-options details{margin-top:8px}
+.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.settings-grid label,#teamPreferenceLabel{display:grid;gap:3px;font-size:11px;color:#b6c8af}
+.settings-grid select,#teamPreference{width:100%;min-width:0;background:#172a23;color:#e5efdc;border:1px solid #78936b60;border-radius:3px;padding:6px;font-size:12px}
+#teamPreferenceLabel{grid-template-columns:1fr 1fr;align-items:center}
+#saveRoomSettings{margin-top:8px}
+#liveRoomStatus{margin:5px 0;color:#e2c78d;font-size:11px}
+#liveRoomStatus:empty{display:none}
+.team-tally{display:flex;align-items:center;justify-content:center;gap:7px;color:#d6e4d5;font-size:11px;letter-spacing:.6px}
+.team-tally span{padding:4px 8px;background:#172b24ee;border:1px solid #62745f70;border-radius:3px}
+.team-tally [data-team=blue],.player-label[data-team=blue],.team-blue{color:#8dcaff}
+.team-tally [data-team=red],.player-label[data-team=red],.team-red{color:#ff9b9d}
+.team-tally .own-team{border-color:currentColor}
+#teamHud{position:absolute;top:87px;left:50%;transform:translateX(-50%);white-space:nowrap}
+#resultTeams{margin:7px 0}
+#boardTeams{margin:8px 0}
+#hud:has(#teamHud:not([hidden])) #mouseNotice{top:138px}

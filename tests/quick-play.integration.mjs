@@ -21,10 +21,11 @@ function join(path = '/api/quick-play', id = randomUUID()) {
   url.searchParams.set('name', 'Quick Play QA');
   const socket = new WebSocket(url);
   sockets.push(socket);
-  const client = {socket, id, welcomes: []};
+  const client = {socket, session: id, welcomes: []};
   socket.on('message', raw => {
     const m = JSON.parse(raw);
     if (m.type === 'welcome') {
+      client.id = m.id;
       client.welcomes.push(m);
       client.last = m.snapshot;
     }
@@ -50,8 +51,10 @@ try {
   const roomId = a.welcomes[0].roomId;
   assert.match(roomId, /^[a-f0-9-]{36}$/);
   await until(() => a.last.actors.every(actor => !actor.bot), 'Eight humans replace all bots');
-  const rejoined = await join('/api/quick-play/' + roomId, departing.id);
+  const rejoined = await join('/api/quick-play/' + roomId, departing.session);
   assert.equal(rejoined.welcomes[0].roomId, roomId);
+  assert.equal(rejoined.id, departing.id);
+  assert.notEqual(rejoined.id, departing.session);
   assert.equal(rejoined.last.actors.filter(actor => actor.id === departing.id).length, 1);
   leave(rejoined);
   for (const client of extra) leave(client);
