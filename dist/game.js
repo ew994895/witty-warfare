@@ -1,5 +1,5 @@
 import * as THREE from './vendor/three.module.js';
-import {RoomConnection,onlineOrigin} from './network.js';
+import {RoomConnection,onlineOrigin} from './network.js?v=09';
 import {MAPS,getMap,createMap} from './maps.js';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {TEAMS,TEAM_NAMES,TEAM_COLORS,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js';
