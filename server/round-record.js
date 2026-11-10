@@ -1,4 +1,4 @@
-import {teamWinner} from '../dist/rules.js';
+import {isTeamGame,teamWinner} from '../dist/rules.js';
 
 export function roundRecord(match, id) {
   const order = (a,b) => (match.settings.scoreLimit ? b.kills-a.kills : 0) || b.score-a.score;
@@ -9,7 +9,7 @@ export function roundRecord(match, id) {
     .filter(actor => actor.account && !actor.waitingForRound && match.time - actor.joinedAt >= 15 && actor.received > actor.roundStartInput)
     .map(actor => ({
       handle: actor.account,
-      won: match.settings.rules === 'tdm' ? actor.team === winningTeam : match.settings.rules==='ffa' ? soloWinner === actor : actor.id===match.roundWinner,
+      won: isTeamGame(match.settings.rules) ? actor.team === winningTeam : match.settings.rules==='ffa' ? soloWinner === actor : actor.id===match.roundWinner,
       kills: actor.kills,
       humanKills: actor.humanKills || 0,
       deaths: actor.deaths,

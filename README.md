@@ -86,7 +86,7 @@ The SQLite-backed Player Hub is deployed as a separate Durable Object. The room 
 
 ## Quick Play and Ranked
 
-**Quick Play** has separate Free-for-all, Team Deathmatch, Gun Game, and Storm Survival playlists. Guests can join in progress, and bots fill open seats. The vote lasts 15 seconds and the lobby carries forward. The existing public eliminations leaderboard is called **Quick Play eliminations** in Player Hub.
+**Quick Play** has separate playlists for Free-for-all, Team Deathmatch, Gun Game, Storm Survival, and the four objective modes. Guests can join in progress, and bots fill open seats. The vote lasts 15 seconds and the lobby carries forward. The existing public eliminations leaderboard is called **Quick Play eliminations** in Player Hub.
 
 **Ranked** is a signed-in, solo 4v4 Team Deathmatch queue. It waits for eight humans, balances the teams by rating, and selects a map from the arena pool. The assigned players have 35 seconds to connect. A match that fails to start leaves ratings unchanged. An active match keeps each player's seat open for reconnects. Leaving and staying away can count as a loss. Ranked ends at the normal TDM time or kill limit and returns a rating result. Select **Queue Ranked Again** to play another match.
 
@@ -97,3 +97,15 @@ Five completed placement matches unlock a player's visible rating and eligibilit
 **Storm Survival** gives each player three lives and a safe zone that starts shrinking after 15 seconds. The storm damages players outside the ring. Players who join after the grace period wait for the next round. The last survivor wins. At the time limit, remaining lives and then eliminations break ties.
 
 Custom Rooms can switch to Gun Game or Storm Survival in Host controls between matches. Run `node tests/ranked.integration.mjs` against a fresh local Worker to verify eight-player matchmaking, reserved reconnects, new playlists, and saved Ranked results.
+
+
+## Objective modes
+
+Quick Play and Custom Rooms offer four Blue vs Red objective modes on every arena. Custom hosts can adjust the score target, bot roster, and team setup. The scoreboard's **OBJ** column tracks each player's contribution. Eliminations still count toward personal stats, and the team score comes from playing the objective.
+
+- **Hardpoint.** Hold the active hill uncontested to score one point per second. The hill moves every 30 seconds. The default target is 75 points.
+- **Domination.** Hold A, B, or C uncontested for two seconds to capture it. Each owned zone scores one point every two seconds. The default target is 100 points.
+- **Capture the Flag.** Bring the enemy flag to your base while your own flag is home. Touch a dropped friendly flag to return it, or wait for its 15-second return. The default target is three captures.
+- **Kill Confirmed.** Collect enemy tags to score. Collect friendly tags to deny the point. Tags expire after 15 seconds. The default target is 30 confirms.
+
+The team ahead at the time limit wins. A tied team score is a draw. Run `node tests/objectives.integration.mjs` against a local Worker to verify the four playlists and a two-player flag capture followed by a map and mode change.

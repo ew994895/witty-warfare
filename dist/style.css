@@ -102,3 +102,11 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 #rankedResult,#hubStanding{color:var(--yellow);font-weight:700}
 .hub-rank-select{display:block;margin-top:14px;color:#c5d6bd;font-size:12px}
 .hub-rank-select select{padding:7px;margin-left:6px;color:inherit;background:#172a23;border:1px solid #78936b80}
+
+#hud:has(#objectiveHud:not([hidden])) #teamHud{top:124px}
+#objectiveHud{position:absolute;left:50%;top:154px;transform:translateX(-50%);max-width:90%;padding:6px 9px;background:#12251eee;border:1px solid #9eb78a70;border-radius:3px;color:#e6f5cf;font-size:10px;text-align:center;letter-spacing:.65px;z-index:6}
+#hud:has(#objectiveHud:not([hidden])) #mouseNotice{top:188px}
+#objectiveMarkers{position:absolute;inset:0;pointer-events:none;z-index:3}
+.objective-marker{position:absolute;transform:translate(-50%,-50%);padding:3px 6px;border:1px solid currentColor;border-radius:3px;background:#10221ce6;color:#e5f49b;white-space:nowrap;font-size:9px;font-weight:800;letter-spacing:.6px}
+.objective-marker[data-team=blue]{color:#8dcaff}
+.objective-marker[data-team=red]{color:#ff9b9d}

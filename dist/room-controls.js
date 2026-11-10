@@ -1,4 +1,4 @@
-import {DIFFICULTIES,GAME_RULES,roomSettings} from './rules.js?v=11';
+import {DIFFICULTIES,GAME_RULES,OBJECTIVE_RULES,defaultScoreLimit,isObjective,isTeamGame,roomSettings,scoreLimits} from './rules.js?v=12';
 
 const skillLabels = {
   default: 'Use room difficulty',
@@ -58,7 +58,7 @@ export function createRoomControls(container) {
       botCount: +value('botCount'),
       difficulty: value('difficulty'),
       duration: +value('duration'),
-      scoreLimit: +value('scoreLimit'),
+      scoreLimit: fields.scoreLimit.dataset.rules===value('rules')?+value('scoreLimit'):defaultScoreLimit(value('rules')),
       teamSetup: value('teamSetup'),
       friendlyFire: value('friendlyFire') === '1',
       respawnTime: +value('respawnTime'),
@@ -67,12 +67,18 @@ export function createRoomControls(container) {
   }
 
   function write(settings) {
-    const tdm = settings.rules === 'tdm';
+    const teamGame = isTeamGame(settings.rules);
     const maxBots = settings.teamSetup === 'humans-vs-bots' ? settings.maxPlayers / 2 : settings.maxPlayers - 1;
-    for (const option of fields.maxPlayers.options) option.disabled = tdm && +option.value % 2 !== 0;
+    for (const option of fields.maxPlayers.options) option.disabled = teamGame && +option.value % 2 !== 0;
     for (const option of fields.botCount.options) option.disabled = +option.value > maxBots;
-    for (const key of ['teamSetup', 'friendlyFire']) labels[key].hidden = !tdm;
+    for (const key of ['teamSetup', 'friendlyFire']) labels[key].hidden = !teamGame;
     labels.scoreLimit.hidden=settings.rules==='gun'||settings.rules==='storm';
+    if(fields.scoreLimit.dataset.rules!==settings.rules){
+      fields.scoreLimit.dataset.rules=settings.rules;
+      labels.scoreLimit.firstChild.textContent=isObjective(settings.rules)
+        ?OBJECTIVE_RULES[settings.rules].unit.toUpperCase()+' TO WIN':'Kills to win';
+      fields.scoreLimit.replaceChildren(...scoreLimits(settings.rules).map(value=>new Option(value||'Time limit only',value)));
+    }
     for (const key of ['rules', 'maxPlayers', 'botCount', 'difficulty', 'duration', 'scoreLimit', 'teamSetup', 'respawnTime']) {
       fields[key].value = settings[key];
     }
@@ -85,9 +91,6 @@ export function createRoomControls(container) {
     });
   }
 
-  fields.rules.addEventListener('change', () => {
-    fields.scoreLimit.value = fields.rules.value === 'tdm' ? 30 : 0;
-  });
   container.addEventListener('change', () => write(read()));
   write(roomSettings());
   return {read, write};
