@@ -16,7 +16,7 @@ WASD moves; hold Space for bunny hops; tap Shift before landing for slide boosts
 
 Normal browsers use Pointer Lock. Embedded browsers that reject it use relative cursor movement plus continuous horizontal turning near the screen edges. M retries pointer lock. Fullscreen is available when supported by the browser.
 
-The match is local free-for-all against five bots, with actual hitscan, headshot bonuses, streak tracking, safe spawns, brief spawn protection, and delayed health regeneration. Practice mode disables bot movement and fire. No online multiplayer or accounts are implemented.
+All three play options use free-for-all scoring, hitscan, headshot bonuses, streak tracking, brief spawn protection, and delayed health regeneration. Vs AI runs locally against five bots. Its optional aim practice difficulty disables bot movement and fire.
 
 ## Source layout
 
@@ -43,15 +43,23 @@ The lobby map selector previews the chosen arena live and remembers the selectio
 `dist/maps.js` supplies shared box geometry, collision volumes, spawn locations, practice positions, lighting, and navigation bounds. Changing maps disposes old scene geometry and sign textures, rebuilds navigation, and resets preview actors. `tests/maps.test.mjs` checks spawn clearance, all spawn-to-spawn routes, wall collisions, practice sightlines, large-map routing, and isolation between builds.
 
 
-## Private multiplayer (first online release)
+## Play options
 
-Run `npm install` then `npm run dev` for the full local Worker and room service. Open the printed localhost URL. Create a room, or paste an eight-character room code and join. The chosen arena, duration and bot difficulty become the room settings. Seven bots initially fill the remaining slots. Humans replace bots, and disconnected players have a 15-second reconnect grace period before a bot fills their slot. Each browser tab has its own guest session.
+- **Public Online** starts Quick Play. New guests join a live public match with room when one is available. A new match starts with bots immediately when a seat is unavailable. Public rounds are three minutes at regular difficulty.
+- **Vs AI** runs offline. Choose your starting arena, round length, and bot difficulty before playing.
+- **Custom Rooms** uses an eight-character invite code or link. The creator chooses the starting arena, round length, and bot difficulty.
 
-Cloudflare Worker deployment: `npm run deploy`. The Worker serves the same game and owns a SQLite-backed Durable Object namespace for room configuration. Gameplay runs at 120 Hz with snapshots at 30 Hz. Clients predict movement using the shared core and reconcile acknowledged inputs; the server controls health, collision, weapon cadence, ammunition, respawns, bots and standings. Hit tests use up to 200 ms of target history, based on server-measured round-trip time, while retaining present-life and spawn-shield checks. Names fade with distance and require line of sight near the crosshair. Opening the online pause menu does not pause the shared match. Each match ends with 15 seconds of map voting, then the next round starts automatically on the same room code and WebSockets. Human votes can be changed until the countdown ends; ties are randomized among leaders, and a no-vote round rotates to the next arena. Host rights transfer when their disconnected slot expires. Live round state is held in memory, so a service deployment/restart resets affected rounds and reconnects clients.
+Online rooms hold eight players including bots. Humans replace bots. A dropped connection has a 15-second grace period. Quick Play tries to reconnect you to your assigned match before looking for a new one.
 
-The existing Cloudflare Pages frontend connects to `witty-warfare-online.ejwit004.workers.dev`. Production CORS allows only the Worker itself and `https://witty-warfare.pages.dev`. Invite codes are unlisted room links, not authenticated accounts. Public matchmaking, accounts/friends, additional modes and controller support belong to later releases.
+Every mode shows standings and a 15-second map vote. You can change your vote and pick the next round's primary. If nobody votes, the arenas rotate. Online ties are randomized among the leaders. The next round starts automatically, keeping both online connections and custom invite codes.
 
-`server/match.js` is the testable shared-room simulation; `server.js` handles Worker routing, WebSocket sessions and room clocks. `dist/network.js` handles input batches and reconnects. `npm test` includes multiplayer simulation regressions. With the local dev server running, `node tests/rooms.integration.mjs` checks real multi-client WebSockets. Set `ROOM_TEST_ORIGIN` to test a deployed Worker.
+Run `npm install` then `npm run dev` for the full local Worker and matchmaking service. Open the printed localhost URL.
+
+Cloudflare Worker deployment: `npm run deploy`. The Worker serves the same game and owns a SQLite-backed Durable Object namespace for room configuration. Gameplay runs at 120 Hz with snapshots at 30 Hz. Clients predict movement using the shared core and reconcile acknowledged inputs; the server controls health, collision, weapon cadence, ammunition, respawns, bots and standings. Hit tests use up to 200 ms of target history, based on server-measured round-trip time, while retaining present-life and spawn-shield checks. Names fade with distance and require line of sight near the crosshair. Opening the online pause menu does not pause the shared match. Host rights transfer when their disconnected slot expires. Live round state is held in memory, so a service deployment/restart resets affected rounds and reconnects clients.
+
+The existing Cloudflare Pages frontend connects to `witty-warfare-online.ejwit004.workers.dev`. Production CORS allows only the Worker itself and `https://witty-warfare.pages.dev`. Invite codes are unlisted room links, not authenticated accounts. Accounts, friends, additional game rules, and controller support belong to later releases.
+
+`server/match.js` is the testable shared-room simulation; `server.js` handles Worker routing, WebSocket sessions and room clocks. `server/quick-play.js` assigns guests to public rooms. `dist/network.js` handles input batches and reconnects. `npm test` includes multiplayer simulation regressions. With the local dev server running, `node tests/rooms.integration.mjs` checks real multi-client WebSockets. Run `node tests/quick-play.integration.mjs` against an empty local server to check concurrent public matchmaking, bot backfill, room isolation, and a complete public round. Set `ROOM_TEST_SKIP_ROUND=1` to run only the matchmaking checks.
 
 
 ## Staying in the room

@@ -1,6 +1,8 @@
 import {MAPS,createMap,getMap} from '../dist/maps.js';
 import {STEP,WEAPONS,createPlayer,createArsenal,stepMovement,createNav,trace,meleeTrace,clamp,damp,switchWeapon,tickArsenal,startReload,fireRound} from '../dist/core.js';
-export const CAPACITY=8, VOTE_SECONDS=15;
+import {VOTE_SECONDS,nextArena} from '../dist/rounds.js';
+export {VOTE_SECONDS};
+export const CAPACITY=8;
 export const poseKeys=['x','z','feet','vx','vz','vy','yaw','pitch','grounded','crouch','slide','slideReady','eye','hp','dead','shield','kills','deaths','score'];
 export function cleanName(value){return String(value||'Rookie').replace(/[\x00-\x1f\x7f<>]/g,'').trim().slice(0,16)||'Rookie';}
 export function validateInput(v){if(!v||!Number.isSafeInteger(v.seq)||v.seq<0||!Number.isFinite(v.yaw)||!Number.isFinite(v.pitch))return null;return {seq:v.seq,yaw:v.yaw%(Math.PI*2),pitch:clamp(v.pitch,-1.45,1.45),forward:clamp(Number(v.forward)||0,-1,1),side:clamp(Number(v.side)||0,-1,1),jump:!!v.jump,crouch:!!v.crouch,aim:!!v.aim,fire:!!v.fire,fresh:!!v.fresh,reload:!!v.reload,weapon:Number.isInteger(v.weapon)?v.weapon:0};}
@@ -30,7 +32,7 @@ export class Match{
  setLoadout(id,primary,respawnNow=false){const a=this.actors.find(a=>a.id===id&&!a.bot);if(!a||!Number.isInteger(primary)||primary<0||primary>=6)return false;a.nextPrimary=primary;if(respawnNow&&this.phase==='playing'&&a.dead===0){a.deaths++;a.streak=0;this.respawn(a);}return true;}
  vote(id,mapId,round=this.round){if(this.phase!=='results'||round!==this.round||!MAPS.some(m=>m.id===mapId)||!this.actors.some(a=>a.id===id&&!a.bot))return false;this.votes.set(id,mapId);return true;}
  voteCounts(){return Object.fromEntries(MAPS.map(m=>[m.id,[...this.votes.values()].filter(v=>v===m.id).length]));}
- chooseNextMap(){const counts=this.voteCounts(),high=Math.max(...Object.values(counts));if(!high)return MAPS[(MAPS.findIndex(m=>m.id===this.map.id)+1)%MAPS.length].id;const tied=MAPS.filter(m=>counts[m.id]===high);return tied[Math.min(tied.length-1,Math.floor(this.random()*tied.length))].id;}
+ chooseNextMap(){return nextArena(this.map.id,this.voteCounts(),this.random);}
  beginRound(mapId){this.map=createMap(mapId);this.nav=createNav(this.map.solids,this.map.navBounds);this.remaining=this.duration;this.phase='playing';this.round++;this.history=[];this.votes.clear();this.voteRemaining=0;for(const a of this.actors){a.kills=a.deaths=a.score=a.streak=a.bestStreak=a.shots=a.hits=a.headshots=0;this.respawn(a);}}
  restart(id){if(id!==this.host||this.phase!=='results'||this.voteRemaining>0)return false;this.beginRound(this.chooseNextMap());return true;}
  snapshot(){return {phase:this.phase,round:this.round,mapId:this.map.id,remaining:this.remaining,host:this.host,voteRemaining:this.voteRemaining,voteCounts:this.voteCounts(),votes:Object.fromEntries(this.votes),actors:this.actors.map(a=>({id:a.id,name:a.name,bot:a.bot,ack:a.ack,...Object.fromEntries(poseKeys.map(k=>[k,a[k]])),primary:a.arsenal.primary,pendingPrimary:a.nextPrimary??a.arsenal.primary,life:a.life||0,streak:a.streak,bestStreak:a.bestStreak,shots:a.shots,hits:a.hits,headshots:a.headshots})),eventId:this.eventId};}
