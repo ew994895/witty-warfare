@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createGamepadInput} from '../dist/gamepad.js';
+import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput,gamepadKey} from '../dist/gamepad.js';
 
 function gamepad(index=0){
   return {index,connected:true,mapping:'standard',axes:[0,0,0,0],
@@ -38,22 +38,122 @@ test('activation and reconnection suppress held buttons until released, then rep
   pad.buttons[7].value=.45;
   assert.equal(sample([pad]).pressed('rt'),true);
   assert.equal(sample([pad]).held.has('rt'),true);
-  pad.buttons[7].value=.1;
+  pad.buttons[7].value=.07;
   assert.equal(sample([pad]).held.has('rt'),false);
   assert.equal(sample([]),null);
   assert.equal(sample([pad]).connected,true);
   assert.equal(sample([pad]).held.has('a'),false);
 });
 
-test('ignores unmapped devices and retains the selected controller when another connects',()=>{
+test('prefers standard layouts on first connection and keeps unknown layouts inactive until calibrated',()=>{
   const sample=createGamepadInput();
   const pad=gamepad(1);
   const other=gamepad();
   other.mapping='';
-  assert.equal(sample([other]),null);
-  assert.equal(sample([null,pad]).connected,true);
-  other.mapping='standard';
   other.axes[0]=1;
-  assert.equal(sample([other,pad]).side,0);
-  assert.equal(sample([other]).side,1);
+  assert.equal(sample([other,pad]).pad.index,1);
+  assert.equal(sample([other]).ready,false);
+  assert.equal(sample([other]).side,0);
+  assert.equal(sample([other]).active,false);
+});
+
+test('all standard Xbox controls map to the intended actions and Guide is unbound',()=>{
+  const sample=createGamepadInput();
+  const pad=gamepad();
+  const standard=['a','b','x','y','lb','rb','lt','rt','view','menu',null,null,'up','down','left','right',null];
+  sample([pad]);
+  for(const [index,name] of standard.entries()){
+    pad.buttons[index].pressed=true;
+    assert.deepEqual([...sample([pad]).held],name?[name]:[]);
+    pad.buttons[index].pressed=false;
+    sample([pad]);
+  }
+});
+
+test('a trigger crossing the release band can make a new press without chatter',()=>{
+  const sample=createGamepadInput();
+  const pad=gamepad();
+  sample([pad]);
+  const trigger=pad.buttons[7];
+  for(const [value,held,pressed] of [[.2,true,true],[.13,true,false],[.07,false,false],[.13,false,false],[.2,true,true]]){
+    trigger.value=value;
+    const input=sample([pad]);
+    assert.equal(input.held.has('rt'),held);
+    assert.equal(input.pressed('rt'),pressed);
+  }
+});
+
+test('calibration fixes a mislabeled layout with swapped buttons, axis triggers and an inverted stick',()=>{
+  const pad=gamepad();
+  pad.id='Xbox Bluetooth fixture';
+  pad.axes=[0,0,-1,0,0,-1,0,0,0,3.285];
+  const rest=[...pad.axes];
+  const controls={
+    a:1,b:0,x:2,y:3,lb:4,rb:5,menu:7,view:6,
+    lt:[2,1],rt:[5,1],up:[9,-1],down:[9,.143],left:[9,.714],right:[9,-.429],
+    moveX:[0,1],moveY:[1,1],lookX:[3,1],lookY:[4,-1]
+  };
+  function hold(name){
+    const control=controls[name];
+    if(Array.isArray(control))pad.axes[control[0]]=control[1];
+    else pad.buttons[control].pressed=true;
+  }
+  function release(){
+    pad.axes=[...rest];
+    for(const button of pad.buttons)button.pressed=false;
+  }
+  const wizard=createGamepadCalibration(pad);
+  pad.buttons[16].pressed=true;
+  wizard.update(pad);
+  assert.equal(wizard.step[0],'a');
+  release();
+  wizard.update(pad);
+  for(const [name] of CALIBRATION_STEPS){
+    hold(name);
+    wizard.update(pad);
+    if(name==='a'){
+      wizard.update(pad);
+      assert.equal(wizard.step[0],'b');
+      release();
+      wizard.update(pad);
+      hold('a');
+      assert.match(wizard.update(pad),/already assigned/);
+    }
+    release();
+    wizard.update(pad);
+  }
+  assert.ok(wizard.profile);
+  const sample=createGamepadInput();
+  const profiles={[gamepadKey(pad)]:wizard.profile};
+  sample([pad],profiles);
+  for(const [name] of CALIBRATION_STEPS.slice(0,14)){
+    hold(name);
+    assert.deepEqual([...sample([pad],profiles).held],[name]);
+    release();
+    sample([pad],profiles);
+  }
+  pad.buttons[10].pressed=true; // Guide on this raw layout, reported outside the learned bindings.
+  assert.equal(sample([pad],profiles).active,false);
+  hold('lt');
+  hold('rt');
+  hold('lookY');
+  const input=sample([pad],profiles);
+  assert.deepEqual([...input.held],['lt','rt']);
+  assert.equal(input.lookX,0);
+  assert.equal(input.lookY,1);
+});
+
+test('View can be skipped when it is reserved by the operating system',()=>{
+  const pad=gamepad();
+  const wizard=createGamepadCalibration(pad);
+  wizard.update(pad);
+  for(const index of [0,1,2,3,4,5,6,7,9]){
+    pad.buttons[index].pressed=true;
+    wizard.update(pad);
+    pad.buttons[index].pressed=false;
+    wizard.update(pad);
+  }
+  assert.equal(wizard.step[0],'view');
+  wizard.skip();
+  assert.equal(wizard.step[0],'up');
 });

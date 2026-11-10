@@ -5,7 +5,7 @@ import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,TEAMS,TEAM_NAMES,TEAM_COLORS,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js?v=12';
 import {createPlayerHub} from './player-hub.js?v=12';
 import {createObjectiveDisplay} from './objectives-ui.js?v=12';
-import {createGamepadInput} from './gamepad.js?v=16';
+import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=17';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
 import {createRoomControls} from './room-controls.js?v=12';
 import {STEP,WEAPONS,PRIMARY_COUNT,PISTOL,KNIFE,meleeTrace,clamp,damp,createPlayer,stepMovement,moveBody,overlap,createArsenal,switchWeapon,startReload,tickArsenal,fireRound,trace,createNav} from './core.js';
@@ -66,6 +66,7 @@ if(Number.isInteger(prefs.primary)&&prefs.primary>=0&&prefs.primary<PRIMARY_COUN
 function savePrefs(){try{localStorage.setItem('voxel-strike-v2',JSON.stringify(prefs))}catch{}}
 
 const sampleGamepad=createGamepadInput();
+const controllerProfiles=prefs.controllerProfiles??={};
 let controller=null,controllerActive=false;
 let soloVote=null,soloVoteEnds=0,captureOnClick=false;
 let rules='ffa',scoreLimit=0,teamScores={blue:0,red:0},modeWinner=null,zoneRadius=0;
@@ -473,7 +474,10 @@ $('openSettings').onclick=()=>{
  lobbySettings.showModal();
 };
 $('closeSettings').onclick=()=>lobbySettings.close();
-lobbySettings.addEventListener('close',()=>$('pausePreferences').append($('preferences')));
+lobbySettings.addEventListener('close',()=>{
+ cancelCalibration();
+ $('pausePreferences').append($('preferences'));
+});
 $('fullscreen').onclick=async event=>{
  const status=$('fullscreenStatus');
  status.hidden=true;
@@ -494,6 +498,7 @@ for(const b of document.querySelectorAll('[data-weapon]'))b.onclick=()=>{selecte
 window.addEventListener('keydown',e=>{
  if(e.target.matches('input,select')&&state!=='playing')return;
  if(state==='playing'&&['Space','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','ControlLeft'].includes(e.code))e.preventDefault();
+ if(e.code==='Escape'&&calibration){e.preventDefault();cancelCalibration();return;}
  if(e.code==='Escape'&&state==='paused'){resume();return;}if(e.code==='Escape'&&state==='playing'){pause();return}if(state!=='playing')return;keys.add(e.code);
  if(e.code==='Tab'){updateScoresVisibility();updateHud()}
  if(e.repeat)return;if(e.code==='Space')jumpBuffer=.12;if(e.code==='KeyR')reload();if(e.code==='KeyT')toggleAim=!toggleAim;if(e.code==='KeyQ')changeWeapon(KNIFE);if(e.code==='KeyE')changeWeapon(arsenal.index===PISTOL?arsenal.primary:PISTOL);if(e.code==='KeyF')pendingShot=true;if(e.code==='KeyM')requestLock();if(/^Digit[123]$/.test(e.code))changeWeapon(arsenal.slots[+e.code.slice(-1)-1]);
@@ -1064,13 +1069,83 @@ function controllerMenu(){
   if(target?.matches('button,summary,input[type="checkbox"]'))target.click();
  }
 }
+const controllerSetup=$('controllerSetup');
+const setupStatus=$('controllerSetupStatus');
+const controllerTest=$('controllerTest');
+const controllerSticks=$('controllerSticks');
+const calibrateButton=$('calibrateController');
+const resetMappingButton=$('resetController');
+const skipViewButton=$('skipControllerView');
+const cancelCalibrationButton=$('cancelControllerCalibration');
+const testButtons=CALIBRATION_STEPS.slice(0,14).map(([name,label])=>{
+ const chip=document.createElement('span');
+ chip.textContent=label.split(' (')[0];
+ controllerTest.append(chip);
+ return [name,chip];
+});
+let calibration=null;
+function showCalibration(hint=''){
+ const step=$('controllerStep'),status=$('controllerStepHint');
+ step.hidden=status.hidden=cancelCalibrationButton.hidden=!calibration;
+ calibrateButton.hidden=Boolean(calibration);
+ resetMappingButton.hidden=Boolean(calibration||!controllerProfiles[controller?.key]);
+ controllerTest.hidden=controllerSticks.hidden=Boolean(calibration||!controller?.ready);
+ skipViewButton.hidden=calibration?.session.step?.[0]!=='view';
+ if(!calibration)return;
+ const {session}=calibration;
+ const [action,label]=session.step;
+ const instruction=action.startsWith('move')||action.startsWith('look')?'Move the':'Press';
+ const prompt=`${session.index+1} / ${CALIBRATION_STEPS.length} · ${instruction} ${label}`;
+ if(step.textContent!==prompt)step.textContent=prompt;
+ if(status.textContent!==hint)status.textContent=hint;
+}
+function cancelCalibration(){
+ if(!calibration)return;
+ calibration=null;
+ sampleGamepad([]);
+ updateControllerSetup();
+}
+calibrateButton.onclick=()=>{
+ if(!controller)return;
+ calibration={key:controller.key,index:controller.pad.index,session:createGamepadCalibration(controller.pad)};
+ setupStatus.textContent='Follow each prompt and release before the next. Leave the Xbox logo button alone.';
+ showCalibration();
+};
+skipViewButton.onclick=()=>{
+ calibration?.session.skip();
+ showCalibration();
+};
+cancelCalibrationButton.onclick=cancelCalibration;
+controllerSetup.addEventListener('toggle',()=>{if(!controllerSetup.open)cancelCalibration();});
+resetMappingButton.onclick=()=>{
+ if(!controller)return;
+ delete controllerProfiles[controller.key];
+ savePrefs();
+ sampleGamepad([]);
+};
+function updateControllerSetup(){
+ const saved=Boolean(controllerProfiles[controller?.key]);
+ calibrateButton.disabled=!controller;
+ setupStatus.textContent=controller
+   ? saved?'Custom mapping saved on this browser. Press each control to test it below.':
+     controller.ready?'Using the browser layout. If buttons show up wrong, choose Calibrate.':
+     'Controller detected. Choose Calibrate to set its buttons and sticks.'
+   : 'Press a button on your paired controller.';
+ showCalibration();
+}
+function testController(){
+ for(const [name,chip] of testButtons)chip.classList.toggle('active',controller.held.has(name));
+ const axis=value=>Math.round(value*100);
+ const sticks=`Left stick ${axis(controller.side)}, ${axis(-controller.forward)} · Right stick ${axis(controller.lookX)}, ${axis(controller.lookY)}`;
+ if(controllerSticks.textContent!==sticks)controllerSticks.textContent=sticks;
+}
 let canReadGamepads=typeof navigator.getGamepads==='function';
 const controllerUnavailable='Controller access is unavailable in this browser view. Try opening the game in its own tab.';
 if(!canReadGamepads)$('controllerStatus').textContent=controllerUnavailable;
 function pollController(){
  if(document.hidden||!canReadGamepads)return;
  const previous=controller;
- try{controller=sampleGamepad(navigator.getGamepads());}
+ try{controller=sampleGamepad(navigator.getGamepads(),controllerProfiles);}
  catch{
   canReadGamepads=false;
   controller=null;
@@ -1080,13 +1155,32 @@ function pollController(){
   if(controllerActive&&state==='playing')pause();
   setControllerActive(false);
   if(canReadGamepads)$('controllerStatus').textContent='Controller disconnected · reconnect and press a button';
+  cancelCalibration();
+  updateControllerSetup();
   return;
  }
  if(!controller)return;
  if(controller.connected){
-  $('controllerStatus').textContent='Controller connected · D-pad browse · A select · Menu play';
-  setControllerActive(true);
+  if(calibration&&(controller.key!==calibration.key||controller.pad.index!==calibration.index))cancelCalibration();
+  $('controllerStatus').textContent=controller.ready?'Controller connected · D-pad browse · A select · Menu play':
+    'Controller detected · open Settings → Controller setup to calibrate';
+  setControllerActive(controller.ready);
+  updateControllerSetup();
  }
+ if(calibration){
+  if(state==='playing'){cancelCalibration();return;}
+  const {session}=calibration;
+  const hint=session.update(controller.pad);
+  if(session.profile){
+   controllerProfiles[controller.key]=session.profile;
+   savePrefs();
+   cancelCalibration();
+   updateControllerSetup();
+  }else showCalibration(hint);
+  return;
+ }
+ if(controllerSetup.open&&controller.ready)testController();
+ if(!controller.ready)return;
  if(controller.active)setControllerActive(true);
  if(state==='playing'&&controllerActive)updateScoresVisibility();
  if(!controller.active)return;
@@ -1105,7 +1199,7 @@ function pollController(){
  if(controller.pressed('rt'))pendingShot=true;
 }
 document.addEventListener('visibilitychange',()=>{
- if(document.hidden)sampleGamepad([]);
+ if(document.hidden){cancelCalibration();sampleGamepad([]);}
 });
 buildGun();let previous=performance.now(),accumulator=0,hudClock=0;
 function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-previous)/1000,.1);previous=now;pollController();if(state==='playing'||online&&state==='paused'){accumulator+=dt;while(accumulator>=STEP&&(state==='playing'||online&&state==='paused')){simulate(STEP);accumulator-=STEP;}hudClock+=dt;if(hudClock>.05){updateHud();hudClock=0}}else{accumulator=0;if(inLobby())animateLobby(dt);else if(state==='results'&&!online)updateSoloVoting(now);}render(dt,now/1000);}requestAnimationFrame(frame);
