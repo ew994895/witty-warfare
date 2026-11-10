@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "witty-warfare-online",
+  "main": "server.js",
+  "compatibility_date": "2026-11-09",
+  "account_id": "c2fea9523554ad627f94d835f9581eac",
+  "assets": {"directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/api/*"]},
+  "durable_objects": {"bindings": [{"name": "ROOMS", "class_name": "ArenaRoom"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["ArenaRoom"]}]
+}

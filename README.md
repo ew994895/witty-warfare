@@ -41,3 +41,14 @@ The lobby map selector previews the chosen arena live and remembers the selectio
 - Pine Ridge (large, 84 × 84): mountain outpost, long lanes, firing pads and covered flanks.
 
 `dist/maps.js` supplies shared box geometry, collision volumes, spawn locations, practice positions, lighting, and navigation bounds. Changing maps disposes old scene geometry and sign textures, rebuilds navigation, and resets preview actors. `tests/maps.test.mjs` checks spawn clearance, all spawn-to-spawn routes, wall collisions, practice sightlines, large-map routing, and isolation between builds.
+
+
+## Private multiplayer (first online release)
+
+Run `npm install` then `npm run dev` for the full local Worker and room service. Open the printed localhost URL. Create a room, or paste an eight-character room code and join. The chosen arena, duration and bot difficulty become the room settings. Seven bots initially fill the remaining slots. Humans replace bots, and disconnected players have a 15-second reconnect grace period before a bot fills their slot. Each browser tab has its own guest session.
+
+Cloudflare Worker deployment: `npm run deploy`. The Worker serves the same game and owns a SQLite-backed Durable Object namespace for room configuration. Gameplay runs at 120 Hz with snapshots at 30 Hz. Clients predict movement using the shared core and reconcile acknowledged inputs; the server controls health, collision, weapon cadence, ammunition, respawns, bots and standings. Names fade with distance and require line of sight near the crosshair. Opening the online pause menu does not pause the shared match. The host can start the next match from results; host rights transfer when their disconnected slot expires. Live round state is held in memory, so a service deployment/restart resets affected rounds and reconnects clients.
+
+The existing Cloudflare Pages frontend connects to `witty-warfare-online.ejwit004.workers.dev`. Production CORS allows only the Worker itself and `https://witty-warfare.pages.dev`. Invite codes are unlisted room links, not authenticated accounts. Public matchmaking, accounts/friends, additional modes and controller support belong to later releases.
+
+`server/match.js` is the testable shared-room simulation; `server.js` handles Worker routing, WebSocket sessions and room clocks. `dist/network.js` handles input batches and reconnects. `npm test` includes multiplayer simulation regressions. With the local dev server running, `node tests/rooms.integration.mjs` checks real multi-client WebSockets. Set `ROOM_TEST_ORIGIN` to test a deployed Worker.

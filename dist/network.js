@@ -1,0 +1,12 @@
+export const onlineOrigin=()=>['localhost','127.0.0.1'].includes(location.hostname)||location.hostname.endsWith('.workers.dev')?location.origin:'https://witty-warfare-online.ejwit004.workers.dev';
+export class RoomConnection{
+ constructor(code,settings,callbacks){this.code=code;this.settings=settings;this.callbacks=callbacks;this.closed=false;this.tries=0;this.pending=[];this.connect();}
+ connect(){const url=new URL(`/api/rooms/${this.code}/socket`,onlineOrigin());url.protocol=url.protocol==='https:'?'wss:':'ws:';for(const [key,value]of Object.entries(this.settings))url.searchParams.set(key,value);const socket=this.socket=new WebSocket(url);let welcomed=false;
+ socket.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}if(m.type==='welcome'){welcomed=true;this.tries=0;this.pending=[];this.callbacks.welcome(m);}else if(m.type==='snapshot')this.callbacks.snapshot(m);else if(m.type==='pong')this.callbacks.ping?.(Math.max(0,Date.now()-m.at));};
+ socket.onopen=()=>{this.pingTimer=setInterval(()=>this.send({type:'ping',at:Date.now()}),3000);};
+ socket.onclose=e=>{clearInterval(this.pingTimer);if(this.closed)return;if(e.code===4000){this.closed=true;this.callbacks.failed('This guest session was opened in another tab.');return;}this.callbacks.status('Connection lost · reconnecting…');if(++this.tries<=5)this.retryTimer=setTimeout(()=>this.connect(),Math.min(2500,this.tries*500));else this.callbacks.failed(welcomed?'Could not reconnect. Return to the lobby and join again.':'Could not join this room. Check the code, connection, or available slots.');};
+ socket.onerror=()=>{};this.welcomeTimer=setTimeout(()=>{if(!welcomed&&socket.readyState<2)socket.close();},7000);}
+ send(data){if(this.socket?.readyState===WebSocket.OPEN)this.socket.send(JSON.stringify(data));}
+ input(frame){if(this.socket?.readyState!==WebSocket.OPEN)return;this.pending.push(frame);if(this.pending.length>=4){this.send({type:'inputs',frames:this.pending});this.pending=[];}}
+ close(){this.closed=true;clearInterval(this.pingTimer);clearTimeout(this.welcomeTimer);clearTimeout(this.retryTimer);this.socket?.close(1000,'Left room');}
+}
