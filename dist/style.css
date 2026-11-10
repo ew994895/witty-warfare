@@ -110,3 +110,16 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .objective-marker{position:absolute;transform:translate(-50%,-50%);padding:3px 6px;border:1px solid currentColor;border-radius:3px;background:#10221ce6;color:#e5f49b;white-space:nowrap;font-size:9px;font-weight:800;letter-spacing:.6px}
 .objective-marker[data-team=blue]{color:#8dcaff}
 .objective-marker[data-team=red]{color:#ff9b9d}
+.controller-status{margin:9px 0 0;font-size:10px;line-height:1.4;color:#b6c8af}
+.controller-active .controller-status,.controller-controls b{color:var(--yellow)}
+.controller-active :is(button,select,input,summary):focus{outline:2px solid var(--yellow);outline-offset:2px}
+.settings-dialog{width:min(440px,calc(100vw - 24px))}
+.settings-dialog .sensitivity{margin-top:18px}
+.controller-controls{line-height:1.65;color:#b6c8af;font-size:11px}
+#fullscreen{margin-top:18px}
+#fullscreenStatus{color:#b6c8af;font-size:11px}
+@media(max-width:530px){
+ .lobby-actions{flex-wrap:wrap;justify-content:flex-end}
+ #lobby header{gap:8px}
+ #lobby .brand{flex-shrink:0}
+}
