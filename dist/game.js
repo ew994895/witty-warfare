@@ -1,8 +1,9 @@
 import * as THREE from './vendor/three.module.js';
-import {RoomConnection,onlineOrigin} from './network.js?v=09';
+import {RoomConnection,onlineOrigin} from './network.js?v=10';
 import {MAPS,getMap,createMap} from './maps.js';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {TEAMS,TEAM_NAMES,TEAM_COLORS,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js';
+import {createPlayerHub} from './player-hub.js?v=10';
 import {createRoomControls} from './room-controls.js';
 import {STEP,WEAPONS,PRIMARY_COUNT,PISTOL,KNIFE,meleeTrace,clamp,damp,createPlayer,stepMovement,moveBody,overlap,createArsenal,switchWeapon,startReload,tickArsenal,fireRound,trace,createNav} from './core.js';
 const $=id=>document.getElementById(id), canvas=$('game');
@@ -155,8 +156,8 @@ function updateBot(b,dt){
  if(sees&&b.react<=0&&b.cool<=0&&target.shield<=0){b.cool=difficulty==='hard'?.2:difficulty==='easy'?.5:.31;const err=difficulty==='hard'?.022:difficulty==='easy'?.11:.055;const dir=b.aim.clone().add(new THREE.Vector3((Math.random()-.5)*err,(Math.random()-.5)*err,(Math.random()-.5)*err)).normalize();const hit=trace(origin,dir,solids,actors.filter(a=>opponents(b,a)),b);const end=origin.clone().addScaledVector(dir,hit.distance);tracer(origin,end,0xff9c79);if(hit.actor)applyDamage(hit.actor,hit.head?23:17,b,hit.head);if(Math.hypot(b.x-player.x,b.z-player.z)<20)shotAudio(0,.12);}
 }
 function clearEffects(){for(const e of effects){scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();}effects.length=0;for(const n of numbers)n.el.remove();numbers.length=0;feeds.length=0;renderFeed();}
-function start(nextMap){if(online)return;if(nextMap)selectMap(nextMap,false);resetTransient();clearEffects();prefs.name=$('name').value.trim()||'Rookie';prefs.primary=selected;savePrefs();difficulty=$('difficulty').value;rules=$('playlist').value;scoreLimit=roomSettings({rules}).scoreLimit;teamScores={blue:0,red:0};remaining=+$('duration').value;simTime=0;streak=bestStreak=shots=hits=headshots=0;lastKill=lastHurt=-20;
- Object.assign(player,createPlayer(...spawns[0]),{id:-1,name:prefs.name});player.yaw=Math.atan2(player.x,player.z);for(let i=0;i<bots.length;i++){const b=bots[i];Object.assign(b,createPlayer(...spawns[i+1]),{cool:1+i*.2,path:[],pathClock:0,think:0,target:null});b.group.visible=true;}
+function start(nextMap){if(online)return;if(nextMap)selectMap(nextMap,false);resetTransient();clearEffects();if(!$('name').readOnly)prefs.name=$('name').value.trim()||'Rookie';prefs.primary=selected;savePrefs();difficulty=$('difficulty').value;rules=$('playlist').value;scoreLimit=roomSettings({rules}).scoreLimit;teamScores={blue:0,red:0};remaining=+$('duration').value;simTime=0;streak=bestStreak=shots=hits=headshots=0;lastKill=lastHurt=-20;
+ Object.assign(player,createPlayer(...spawns[0]),{id:-1,name:$('name').value.trim()||'Rookie'});player.yaw=Math.atan2(player.x,player.z);for(let i=0;i<bots.length;i++){const b=bots[i];Object.assign(b,createPlayer(...spawns[i+1]),{cool:1+i*.2,path:[],pathClock:0,think:0,target:null});b.group.visible=true;}
  const teamSpawns=[...spawns].sort((a,b)=>b[1]-a[1]);
  for(const [i,actor] of actors.entries()){
    actor.team=rules==='tdm'?TEAMS[i%2]:null;
@@ -179,12 +180,17 @@ function finish(){
    soloVote=null;
    soloVoteEnds=performance.now()+VOTE_SECONDS*1000;
  }
- syncMatchLoadout();state='results';resetTransient();if(document.pointerLockElement)document.exitPointerLock();$('hud').hidden=true;$('results').hidden=false;document.body.classList.remove('scoped');const rank=rankedActors().indexOf(player)+1;
+ syncMatchLoadout();state='results';resetTransient();if(document.pointerLockElement)document.exitPointerLock();$('hud').hidden=true;$('results').hidden=false;document.body.classList.remove('scoped');
+ const standings=rankedActors();
+ const rank=standings.indexOf(player)+1;
  renderRoomControls();
  $('results').firstElementChild.scrollTop=0;
  renderResults();
  const winner=rules==='tdm'?teamWinner(teamScores):null;
- const place=rank===1?'ARENA CONQUERED.':`YOU PLACED #${rank}.`;
+ const [leader,runnerUp]=standings;
+ const tiesLeader=actor=>actor&&leader&&actor.score===leader.score&&(!scoreLimit||actor.kills===leader.kills);
+ const tied=tiesLeader(player)&&tiesLeader(runnerUp);
+ const place=tied?'DRAW.':rank===1?'ARENA CONQUERED.':`YOU PLACED #${rank}.`;
  $('resultTitle').textContent=difficulty==='practice'&&!online?'Practice complete.':rules==='tdm'?(winner?(winner===player.team?'VICTORY.':'DEFEAT.'):'DRAW.'):place;
  $('resultName').textContent=`${online?.mode==='public'?'Public Online':online?'Custom Room':'Vs AI'} · ${ruleLabel(rules)} · ${activeMap.name} · ${player.score} points · ${bestStreak} best streak · ${headshots} headshots`;
  $('finalKills').textContent=player.kills;$('finalDeaths').textContent=player.deaths;$('finalAccuracy').textContent=(shots?Math.round(hits/shots*100):0)+'%';
@@ -378,6 +384,8 @@ function renderRoomControls(){
  const waiting=visible&&state==='results';
  const host=visible&&controls.host===online.id;
  $('roomIntermission').hidden=!waiting;
+ $('pauseFriendInvite').hidden=!(visible&&state==='paused'&&accountProfile);
+ $('resultsFriendInvite').hidden=!(waiting&&accountProfile);
  $('startNextMatch').hidden=!(waiting&&host);
  root.hidden=!visible;
  if(!visible)return;
@@ -496,10 +504,11 @@ async function enterRoom(action){
    const session=getGuestSession();
    const connection={code,id:session,mode:isPublic?'public':'custom',net:null};
    online=connection;
-   prefs.name=$('name').value.trim()||'Rookie';
+   if(!$('name').readOnly)prefs.name=$('name').value.trim()||'Rookie';
    prefs.primary=selected;
    savePrefs();
-   connection.net=new RoomConnection(code,{session,name:prefs.name,primary:selected,...(isPublic?{rules:$('playlist').value}:{})},{
+   connection.net=new RoomConnection(code,{session,name:$('name').value.trim()||'Rookie',primary:selected,...(isPublic?{rules:$('playlist').value}:{})},{
+     ticket:()=>hub.ticket(),
      welcome:m=>{
        if(online!==connection)return;
        online.id=m.id;
@@ -633,5 +642,18 @@ for(const config of MAPS){const b=document.createElement('button');b.type='butto
 };$('voteOptions').append(b);}
 $('respawnLoadout').onclick=equipAndRespawn;$('resumeTop').onclick=resume;
 
+let accountProfile=null;
+const hub=createPlayerHub(onlineOrigin,profile=>{
+ accountProfile=profile;
+ $('name').readOnly=Boolean(profile);
+ $('name').value=profile?profile.name:prefs.name;
+ renderRoomControls();
+},code=>{
+ lobby();
+ selectMode('custom');
+ $('roomCode').value=code;
+ enterRoom('join');
+});
+$('pauseFriendInvite').onclick=$('resultsFriendInvite').onclick=()=>{if(online?.code&&accountProfile)hub.open(online.code);};
 buildGun();let previous=performance.now(),accumulator=0,hudClock=0;
 function frame(now){requestAnimationFrame(frame);const dt=Math.min((now-previous)/1000,.1);previous=now;if(state==='playing'||online&&state==='paused'){accumulator+=dt;while(accumulator>=STEP&&(state==='playing'||online&&state==='paused')){simulate(STEP);accumulator-=STEP;}hudClock+=dt;if(hudClock>.05){updateHud();hudClock=0}}else{accumulator=0;if(state==='results'&&!online)updateSoloVoting(now);}render(dt,now/1000);}requestAnimationFrame(frame);

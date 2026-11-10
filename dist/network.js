@@ -1,7 +1,12 @@
 export const onlineOrigin=()=>['localhost','127.0.0.1'].includes(location.hostname)||location.hostname.endsWith('.workers.dev')?location.origin:'https://witty-warfare-online.ejwit004.workers.dev';
 export class RoomConnection{
  constructor(code,settings,callbacks){this.code=code;this.settings=settings;this.callbacks=callbacks;this.closed=false;this.tries=0;this.pending=[];this.connect();}
- connect(){const path=this.code?`/api/rooms/${this.code}/socket`:this.roomId?`/api/quick-play/${this.roomId}`:'/api/quick-play';const url=new URL(path,onlineOrigin());url.protocol=url.protocol==='https:'?'wss:':'ws:';for(const [key,value]of Object.entries(this.settings))url.searchParams.set(key,value);const socket=this.socket=new WebSocket(url);let welcomed=false;
+ async connect(){
+ let ticket;
+ try{ticket=await this.callbacks.ticket?.();}
+ catch(error){if(!this.closed)this.callbacks.failed(error.message);return;}
+ if(this.closed)return;
+ const path=this.code?`/api/rooms/${this.code}/socket`:this.roomId?`/api/quick-play/${this.roomId}`:'/api/quick-play';const url=new URL(path,onlineOrigin());url.protocol=url.protocol==='https:'?'wss:':'ws:';for(const [key,value]of Object.entries(this.settings))url.searchParams.set(key,value);if(ticket)url.searchParams.set('ticket',ticket);const socket=this.socket=new WebSocket(url);let welcomed=false;
  socket.onmessage=e=>{let m;try{m=JSON.parse(e.data);}catch{return;}if(m.type==='probe'){this.send({type:'probeReply',n:m.n});return;}if(m.type==='welcome'){welcomed=this.joined=true;clearTimeout(this.welcomeTimer);this.roomId=m.roomId||this.roomId;this.tries=0;this.pending=[];this.callbacks.welcome(m);}else if(m.type==='snapshot')this.callbacks.snapshot(m);else if(m.type==='roomSettingsResult'||m.type==='teamPreferenceResult'||m.type==='restartResult')this.callbacks.roomUpdate?.(m);else if(m.type==='pong')this.callbacks.ping?.(Math.max(0,Date.now()-m.at));};
  socket.onopen=()=>{this.pingTimer=setInterval(()=>this.send({type:'ping',at:Date.now()}),3000);};
  socket.onclose=e=>{clearInterval(this.pingTimer);clearTimeout(this.welcomeTimer);if(this.closed)return;if(e.code===4000){this.closed=true;this.callbacks.failed('This guest session was opened in another tab.');return;}this.callbacks.status('Connection lost · reconnecting…');this.tries++;if(!this.code&&this.tries>=2)this.roomId=null;if(this.tries<=5)this.retryTimer=setTimeout(()=>this.connect(),Math.min(2500,this.tries*500));else this.callbacks.failed(this.joined?'Could not reconnect. Return to the lobby and join again.':this.code?'Could not join this room. Check the code, connection, or available slots.':'Public matchmaking is unavailable. Try again in a moment.');};

@@ -73,3 +73,13 @@ Press Esc during a match to choose any of the six primaries. The choice applies 
 Use `node tests/tdm.integration.mjs` to verify the separate public queues, custom permissions, and queued room changes through a complete round.
 
 To exercise the complete two-player loop on a running server, use `node tests/room-round.integration.mjs` (takes one two-minute round). It checks queued and immediate loadouts, changed votes, a host-started map change, the same room/WebSockets, and loadouts retained into the next round.
+
+## Player Hub
+
+Guest play is available in every mode. Open **Player Hub** to create an account with a unique @handle and an editable callsign. Save the generated sign-in key somewhere private. It signs you in on another device and there is no email reset. The server stores a hash of the key and issues a 30-day session per sign-in. Online rooms use short-lived, single-use play tickets.
+
+Signed-in players who participate for at least 15 seconds and stay through the end of a round get lifetime stats. Public Online and Custom Rooms have separate totals for matches, wins, eliminations, deaths, accuracy, headshot eliminations, best streak, and best score. Six milestone awards come from those totals. Offline practice keeps its local records. The public top 25 orders players by human eliminations from completed Public Online rounds, then public wins.
+
+Add friends by their exact @handle. Accept, decline, cancel, or remove connections in **Friends**. In a Custom Room, use **Invite a Friend** from the pause or results screen to send an invite to an accepted friend. They can join from their Friends inbox. Invites expire after 20 minutes.
+
+The SQLite-backed Player Hub is deployed as a separate Durable Object. The room server saves completed results to its outbox and retries delivery; match IDs prevent duplicate totals. Run `node tests/accounts.integration.mjs` against a local Worker for account, invite, and completed-match checks. Use Node 22.13 or newer for the SQLite regression fixture.

@@ -87,7 +87,7 @@ export class Match{
      }
    }
  }
- join(id,name,primary=0){
+ join(id,name,primary=0,account=null){
    const humans=this.humans();
    let actor=humans.find(a=>a.id===id);
    if(actor){actor.queue=[];actor.inputAge=0;return actor;}
@@ -95,6 +95,9 @@ export class Match{
    const limit=this.phase==='results'?nextLimit:Math.min(humanLimit(this.settings),nextLimit);
    if(humans.length>=limit)return null;
    actor=this.actor(id,name,false,primary);
+   actor.account=account;
+   actor.joinedAt=this.time;
+   actor.roundStartInput=actor.received;
    actor.team=null;
    if(this.settings.rules==='tdm'){
      const blue=humans.filter(a=>a.team==='blue').length;
@@ -175,6 +178,7 @@ export class Match{
      return true;
    }
    attacker.kills++;
+   if(!target.bot)attacker.humanKills=(attacker.humanKills||0)+1;
    attacker.streak++;
    attacker.bestStreak=Math.max(attacker.bestStreak,attacker.streak);
    const bonus=(head?50:0)+(attacker.slide>0?25:0)+(!attacker.grounded?25:0);
@@ -222,7 +226,9 @@ export class Match{
    this.assignTeams();
    this.fillBots(false);
    for(const a of this.actors){
-     a.kills=a.deaths=a.score=a.streak=a.bestStreak=a.shots=a.hits=a.headshots=0;
+     a.kills=a.deaths=a.score=a.streak=a.bestStreak=a.shots=a.hits=a.headshots=a.humanKills=0;
+     a.joinedAt=this.time;
+     a.roundStartInput=a.received;
      this.respawn(a);
    }
  }
