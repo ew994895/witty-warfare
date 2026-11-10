@@ -18,9 +18,11 @@ export class Match{
    this.nav=createNav(this.map.solids,this.map.navBounds);
    this.configure(roomSettings(config));
    this.time=0;
-   this.remaining=this.duration;
-   this.phase='playing';
-   this.round=1;
+   const waiting=!this.public&&config.intermission===true;
+   this.remaining=waiting?0:this.duration;
+   this.phase=waiting?'results':'playing';
+   this.round=Number.isSafeInteger(config.round)&&config.round>0?config.round:1;
+   this.nextSettings=waiting&&config.nextSettings?roomSettings(config.nextSettings):null;
    this.actors=[];
    this.host=null;
    this.events=[];
@@ -30,7 +32,7 @@ export class Match{
    this.votes=new Map();
    this.voteRemaining=0;
    this.teamScores={blue:0,red:0};
-   this.fillBots(false);
+   if(!waiting)this.fillBots(false);
  }
  configure(settings){
    this.settings=settings;
@@ -89,7 +91,8 @@ export class Match{
    const humans=this.humans();
    let actor=humans.find(a=>a.id===id);
    if(actor){actor.queue=[];actor.inputAge=0;return actor;}
-   const limit=Math.min(humanLimit(this.settings),humanLimit(this.nextSettings??this.settings));
+   const nextLimit=humanLimit(this.nextSettings??this.settings);
+   const limit=this.phase==='results'?nextLimit:Math.min(humanLimit(this.settings),nextLimit);
    if(humans.length>=limit)return null;
    actor=this.actor(id,name,false,primary);
    actor.team=null;
@@ -98,8 +101,10 @@ export class Match{
      actor.team=this.settings.teamSetup==='humans-vs-bots'||blue<=humans.length-blue?'blue':'red';
    }
    this.actors.push(actor);
-   this.fillBots();
-   this.respawn(actor);
+   if(this.public||this.phase==='playing'){
+     this.fillBots();
+     this.respawn(actor);
+   }
    if(!this.host)this.host=id;
    return actor;
  }
@@ -188,14 +193,14 @@ export class Match{
  botInput(a){if(a.skill==='practice')return {yaw:a.yaw,pitch:0,weapon:a.arsenal.primary};a.navTime-=STEP;const targets=this.actors.filter(b=>opponents(a,b)&&b.dead===0).sort((b,c)=>Math.hypot(b.x-a.x,b.z-a.z)-Math.hypot(c.x-a.x,c.z-a.z)),target=targets[0];if(!target)return null;const dx=target.x-a.x,dz=target.z-a.z,dist=Math.hypot(dx,dz),sees=dist<this.map.sight&&this.visible(a,target);let goal=target;if(!sees){if(a.navTime<=0){a.path=this.nav.path(a,target);a.navTime=.7;}while(a.path.length&&Math.hypot(a.path[0].x-a.x,a.path[0].z-a.z)<.7)a.path.shift();goal=a.path[0]||target;}const yaw=Math.atan2(a.x-goal.x,a.z-goal.z),aimYaw=Math.atan2(-dx,-dz),error=a.skill==='hard'?.012:a.skill==='easy'?.09:.04;
  // Bots move with the same collision rules and keep their existing slower pace.
  a.botReact=sees?Math.max(0,(a.botReact||0)-STEP):(a.skill==='hard'?.2:.45);let forward=sees?(dist>12?1:dist<5?-.6:0):1,side=sees?Math.sin(this.time+a.id.length)>.0?.45:-.45:0;return {seq:0,yaw:sees?aimYaw+Math.sin(this.time*9+a.id.length)*error:yaw,pitch:Math.atan2(target.feet+target.eye-.25-(a.feet+a.eye),dist||1),forward,side,jump:false,crouch:false,aim:true,fire:sees&&a.botReact===0&&target.shield===0,fresh:true,weapon:a.arsenal.primary,reload:a.arsenal.mags[a.arsenal.index]===0};}
- step(){if(this.phase==='results'){this.voteRemaining=Math.max(0,this.voteRemaining-STEP);if(!this.voteRemaining)this.beginRound(this.chooseNextMap());return;}if(this.phase!=='playing')return;this.time+=STEP;this.remaining=Math.max(0,this.remaining-STEP);if(!this.remaining){this.finishRound();return;}for(const a of this.actors){a.shield=Math.max(0,a.shield-STEP);if(a.dead>0){if(!a.bot){const i=a.queue.shift();if(i)a.ack=i.seq;}a.dead=Math.max(0,a.dead-STEP);if(!a.dead)this.respawn(a);continue;}let input=a.bot?this.botInput(a):a.queue.shift();if(!input){a.inputAge+=STEP;input={seq:a.ack,yaw:a.yaw,pitch:a.pitch,weapon:a.arsenal.index};}else{a.inputAge=0;if(!a.bot)a.ack=input.seq;}a.lastInput=input;a.recoil=damp(a.recoil||0,0,12,STEP);a.bloom=damp(a.bloom||0,0,6,STEP);a.ads=damp(a.ads||0,input.aim?1:0,a.arsenal.index===1?15:22,STEP);applyInput(a,input,this.map.solids);if(a.bot){const speed=Math.hypot(a.vx,a.vz),cap=this.map.botSpeed*(a.skill==='hard'?1.4:1);if(speed>cap){a.vx*=cap/speed;a.vz*=cap/speed;}}a.botCool=Math.max(0,(a.botCool||0)-STEP);if((input.fire||a.arsenal.burstRemaining>0)&&(!a.bot||!a.botCool)){this.shoot(a,!!input.fresh);if(a.bot)a.botCool=a.skill==='hard'?.2:a.skill==='easy'?.5:.31;if(this.phase==='results')return;}if(a.arsenal.mags[a.arsenal.index]===0&&a.arsenal.cooldown===0)startReload(a.arsenal);if(a.hp<100&&this.time-a.lastHurt>4)a.hp=Math.min(100,a.hp+22*STEP);}this.history.push({time:this.time,actors:this.actors.map(a=>({id:a.id,life:a.life,x:a.x,z:a.z,feet:a.feet,crouch:a.crouch}))});while(this.history.length>30)this.history.shift();}
+ step(){if(this.phase==='results'){if(!this.public)return;this.voteRemaining=Math.max(0,this.voteRemaining-STEP);if(!this.voteRemaining)this.beginRound(this.chooseNextMap());return;}if(this.phase!=='playing')return;this.time+=STEP;this.remaining=Math.max(0,this.remaining-STEP);if(!this.remaining){this.finishRound();return;}for(const a of this.actors){a.shield=Math.max(0,a.shield-STEP);if(a.dead>0){if(!a.bot){const i=a.queue.shift();if(i)a.ack=i.seq;}a.dead=Math.max(0,a.dead-STEP);if(!a.dead)this.respawn(a);continue;}let input=a.bot?this.botInput(a):a.queue.shift();if(!input){a.inputAge+=STEP;input={seq:a.ack,yaw:a.yaw,pitch:a.pitch,weapon:a.arsenal.index};}else{a.inputAge=0;if(!a.bot)a.ack=input.seq;}a.lastInput=input;a.recoil=damp(a.recoil||0,0,12,STEP);a.bloom=damp(a.bloom||0,0,6,STEP);a.ads=damp(a.ads||0,input.aim?1:0,a.arsenal.index===1?15:22,STEP);applyInput(a,input,this.map.solids);if(a.bot){const speed=Math.hypot(a.vx,a.vz),cap=this.map.botSpeed*(a.skill==='hard'?1.4:1);if(speed>cap){a.vx*=cap/speed;a.vz*=cap/speed;}}a.botCool=Math.max(0,(a.botCool||0)-STEP);if((input.fire||a.arsenal.burstRemaining>0)&&(!a.bot||!a.botCool)){this.shoot(a,!!input.fresh);if(a.bot)a.botCool=a.skill==='hard'?.2:a.skill==='easy'?.5:.31;if(this.phase==='results')return;}if(a.arsenal.mags[a.arsenal.index]===0&&a.arsenal.cooldown===0)startReload(a.arsenal);if(a.hp<100&&this.time-a.lastHurt>4)a.hp=Math.min(100,a.hp+22*STEP);}this.history.push({time:this.time,actors:this.actors.map(a=>({id:a.id,life:a.life,x:a.x,z:a.z,feet:a.feet,crouch:a.crouch}))});while(this.history.length>30)this.history.shift();}
  setLoadout(id,primary,respawnNow=false){const a=this.actors.find(a=>a.id===id&&!a.bot);if(!a||!Number.isInteger(primary)||primary<0||primary>=6)return false;a.nextPrimary=primary;if(respawnNow&&this.phase==='playing'&&a.dead===0){a.deaths++;a.streak=0;this.respawn(a);}return true;}
  vote(id,mapId,round=this.round){if(this.phase!=='results'||round!==this.round||!MAPS.some(m=>m.id===mapId)||!this.actors.some(a=>a.id===id&&!a.bot))return false;this.votes.set(id,mapId);return true;}
  voteCounts(){return Object.fromEntries(MAPS.map(m=>[m.id,[...this.votes.values()].filter(v=>v===m.id).length]));}
  chooseNextMap(){return nextArena(this.map.id,this.voteCounts(),this.random);}
  finishRound(){
    this.phase='results';
-   this.voteRemaining=VOTE_SECONDS;
+   this.voteRemaining=this.public?VOTE_SECONDS:0;
    this.votes.clear();
    this.event({type:'results'});
  }
@@ -221,6 +226,11 @@ export class Match{
      this.respawn(a);
    }
  }
- restart(id){if(id!==this.host||this.phase!=='results'||this.voteRemaining>0)return false;this.beginRound(this.chooseNextMap());return true;}
+ restart(id,round,settings){
+   if(this.public||!this.host||id!==this.host||this.phase!=='results'||round!==this.round)return false;
+   if(settings!==undefined&&!this.queueSettings(id,settings,round))return false;
+   this.beginRound(this.chooseNextMap());
+   return true;
+ }
  snapshot(){return {phase:this.phase,round:this.round,mapId:this.map.id,remaining:this.remaining,rules:this.settings.rules,scoreLimit:this.settings.scoreLimit,teamScores:this.teamScores,settings:this.public?undefined:this.settings,nextSettings:this.nextSettings,host:this.host,voteRemaining:this.voteRemaining,voteCounts:this.voteCounts(),votes:Object.fromEntries(this.votes),actors:this.actors.map(a=>({id:a.id,name:a.name,bot:a.bot,team:a.team,teamPreference:a.teamPreference,skill:a.skill,ack:a.ack,...Object.fromEntries(poseKeys.map(k=>[k,a[k]])),primary:a.arsenal.primary,pendingPrimary:a.nextPrimary??a.arsenal.primary,life:a.life||0,streak:a.streak,bestStreak:a.bestStreak,shots:a.shots,hits:a.hits,headshots:a.headshots})),eventId:this.eventId};}
 }

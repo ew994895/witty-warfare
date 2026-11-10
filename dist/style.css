@@ -58,3 +58,9 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 #resultTeams{margin:7px 0}
 #boardTeams{margin:8px 0}
 #hud:has(#teamHud:not([hidden])) #mouseNotice{top:138px}
+
+#roomIntermission{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:9px 0;padding:8px 10px;border:1px solid #81966f60;border-radius:4px;background:#1d2c25}
+#intermissionCode{display:block;color:var(--yellow);font-size:11px;letter-spacing:1px}
+#intermissionStatus{display:block;margin-top:3px;color:#b6c8af;font-size:11px}
+#results #resultsCopyRoom{margin:0;padding:7px 9px;white-space:nowrap}
+#results #startNextMatch{margin:10px 0;padding:12px 14px}

@@ -62,11 +62,16 @@ export class ArenaRoom{
   const a=this.match.join(id,url.searchParams.get('name'),Number(url.searchParams.get('primary')));if(!a)return Response.json({error:'This room is full'},{status:409});const pair=new WebSocketPair(),[client,socket]=Object.values(pair);socket.accept();const old=this.clients.get(id);if(old)old.socket.close(4000,'Reconnected elsewhere');const state={socket,eventId:this.match.eventId,round:this.match.round,tokens:90,tokenTime:Date.now()};this.clients.set(id,state);this.disconnected.delete(id);
  socket.addEventListener('message',event=>{if(this.clients.get(id)!==state)return;const now=Date.now();state.tokens=Math.min(90,state.tokens+(now-state.tokenTime)*.06);state.tokenTime=now;if(state.tokens<1||typeof event.data!=='string'||event.data.length>16000){socket.close(1008,'Too many messages');return;}state.tokens--;let data;try{data=JSON.parse(event.data);}catch{return;}if(!data||typeof data!=='object')return;if(data.type==='probeReply'&&data.n===state.probe){const actor=this.match.actors.find(a=>a.id===id);if(actor)actor.rtt=Math.min(.5,(Date.now()-state.probeTime)/1000);state.probe=null;}if(data.type==='inputs')this.match.inputs(id,data.frames);if(data.type==='loadout')this.match.setLoadout(id,data.primary,data.respawn===true);if(data.type==='vote')this.match.vote(id,data.mapId,data.round);if(data.type==='roomSettings'){
    const accepted=this.match.queueSettings(id,data.settings,data.round);
+   if(accepted&&this.match.phase==='results')this.persistConfig();
    socket.send(JSON.stringify({type:'roomSettingsResult',accepted}));
  }if(data.type==='teamPreference'){
    const accepted=this.match.chooseTeam(id,data.team,data.round);
    socket.send(JSON.stringify({type:'teamPreferenceResult',accepted}));
- }if(data.type==='restart')this.match.restart(id);if(data.type==='ping')socket.send(JSON.stringify({type:'pong',at:data.at}));});
+ }if(data.type==='restart'){
+   const accepted=this.match.restart(id,data.round,data.settings);
+   if(accepted)this.persistConfig();
+   socket.send(JSON.stringify({type:'restartResult',accepted}));
+ }if(data.type==='ping')socket.send(JSON.stringify({type:'pong',at:data.at}));});
  const close=event=>{
   try{socket.close(1000,'Connection closed');}catch{}
   if(this.clients.get(id)!==state)return;
@@ -98,5 +103,17 @@ export class ArenaRoom{
  welcome(id,arsenal,snapshot,roomId){
   return {type:'welcome',id,roomId,config:{mapId:this.match.map.id,duration:this.match.duration,difficulty:this.match.difficulty},snapshot,arsenal};
  }
- startClock(){if(this.clock)return;this.previous=Date.now();this.accumulator=0;this.clock=setInterval(()=>{const now=Date.now();this.accumulator+=Math.min((now-this.previous)/1000,.1);this.previous=now;this.expireSeats(now);while(this.accumulator>=1/120){this.match.step();this.accumulator-=1/120;}if(this.lastRound!==this.match.round){this.lastRound=this.match.round;this.config={...this.config,...this.match.settings,mapId:this.match.map.id};this.ctx.storage.put('config',this.config);}const snapshot=this.match.snapshot();for(const [id,c]of this.clients){const actor=this.match.actors.find(a=>a.id===id);try{if(c.round!==this.match.round){c.round=this.match.round;c.eventId=this.match.eventId;c.socket.send(JSON.stringify(this.welcome(id,actor?.arsenal,snapshot,c.roomId)));continue;}if(!c.probeTime||now-c.probeTime>3000){c.probe=crypto.randomUUID();c.probeTime=now;c.socket.send(JSON.stringify({type:'probe',n:c.probe}));}c.socket.send(JSON.stringify({type:'snapshot',...snapshot,arsenal:actor?.arsenal,events:this.match.events.filter(e=>e.n>c.eventId)}));c.eventId=this.match.eventId;}catch{c.socket.close();}}},1000/30);}
+ persistConfig(){
+  const match=this.match;
+  const intermission=!match.public&&match.phase==='results';
+  this.lastRound=match.round;
+  this.config={...this.config,...match.settings,mapId:match.map.id,round:match.round,intermission,
+   nextSettings:intermission?match.nextSettings:null};
+  this.ctx.storage.put('config',this.config);
+ }
+ startClock(){if(this.clock)return;this.previous=Date.now();this.accumulator=0;this.clock=setInterval(()=>{const now=Date.now();this.accumulator+=Math.min((now-this.previous)/1000,.1);this.previous=now;this.expireSeats(now);while(this.accumulator>=1/120){this.match.step();this.accumulator-=1/120;}const waiting=!this.match.public&&this.match.phase==='results';
+ if(this.lastRound!==this.match.round||waiting!==Boolean(this.config.intermission))this.persistConfig();
+ if(waiting&&now<(this.nextResultsSnapshot??0))return;
+ this.nextResultsSnapshot=waiting?now+125:0;
+ const snapshot=this.match.snapshot();for(const [id,c]of this.clients){const actor=this.match.actors.find(a=>a.id===id);try{if(c.round!==this.match.round){c.round=this.match.round;c.eventId=this.match.eventId;c.socket.send(JSON.stringify(this.welcome(id,actor?.arsenal,snapshot,c.roomId)));continue;}if(!c.probeTime||now-c.probeTime>3000){c.probe=crypto.randomUUID();c.probeTime=now;c.socket.send(JSON.stringify({type:'probe',n:c.probe}));}c.socket.send(JSON.stringify({type:'snapshot',...snapshot,arsenal:actor?.arsenal,events:this.match.events.filter(e=>e.n>c.eventId)}));c.eventId=this.match.eventId;}catch{c.socket.close();}}},1000/30);}
 }

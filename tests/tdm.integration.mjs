@@ -101,15 +101,23 @@ try {
     host.send({type: 'vote', round: 1, mapId: 'pine-ridge'});
     guest.send({type: 'vote', round: 1, mapId: 'pine-ridge'});
     await until(() => guest.last.voteCounts['pine-ridge'] === 2, 'Both votes registered');
+    guest.send({type:'restart', round:1});
+    const guestStart = await until(() => guest.messages.shift(), 'Guest receives start denial');
+    assert.equal(guestStart.type, 'restartResult');
+    assert.equal(guestStart.accepted, false);
+    await sleep(16000);
+    assert.equal(host.last.phase, 'results');
+    assert.equal(guest.last.voteRemaining, 0);
+    host.send({type:'restart', round:1, settings:{...update.settings,respawnTime:4}});
     await until(() => host.last.round === 2 && guest.last.round === 2, 'Both players enter the next round', 22000);
     assert.equal(guest.last.rules, 'tdm');
     assert.equal(guest.last.mapId, 'pine-ridge');
-    assert.equal(guest.last.settings.respawnTime, 2.5);
+    assert.equal(guest.last.settings.respawnTime, 4);
     assert.deepEqual(humans(guest).map(a => a.team), ['blue', 'blue']);
     assert.deepEqual(bots(guest).map(a => [a.team, a.skill]), [['red', 'hard'], ['red', 'practice']]);
     assert.equal(guest.socket.readyState, WebSocket.OPEN);
     assert.equal(host.socket.readyState, WebSocket.OPEN);
-    console.log('PASS: queued rules applied after map voting with the same room and connections');
+    console.log('PASS: untimed intermission and host rules applied after map voting with the same room and connections');
   }
 } finally {
   for (const client of clients) close(client);

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {STEP} from '../dist/core.js';
 import {roomSettings, teamWinner} from '../dist/rules.js';
 import {Match} from '../server/match.js';
 
@@ -42,8 +41,7 @@ test('teammates cannot be shot by default and only enemy eliminations count towa
   assert.equal(match.phase, 'results');
   assert.equal(teamWinner(match.snapshot().teamScores), 'blue');
   assert.ok(match.vote(ally.id, 'pine-ridge'));
-  match.voteRemaining = STEP / 2;
-  match.step();
+  assert.ok(match.restart(match.host, match.round));
   assert.equal(match.map.id, 'pine-ridge');
   assert.equal(match.round, 2);
   assert.deepEqual(match.teamScores, {blue: 0, red: 0});
@@ -77,8 +75,7 @@ test('only the current host can queue changes and no queued cap evicts existing 
   assert.equal(match.settings.rules, 'ffa');
   assert.equal(match.join('overflow', 'Overflow'), null);
   match.finishRound();
-  match.voteRemaining = STEP / 2;
-  match.step();
+  assert.ok(match.restart(match.host, match.round));
   assert.equal(match.round, 2);
   assert.equal(match.duration, 120);
   assert.equal(match.settings.rules, 'tdm');
