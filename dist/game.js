@@ -524,7 +524,8 @@ function selectMode(mode){
  $('createSettings').hidden=mode!=='custom';
  $('playlistLabel').hidden=$('playlist').hidden=mode==='custom'||mode==='ranked';
  $('modePill').textContent=mode==='public'?'8 SLOTS':mode==='ai'?'OFFLINE':mode==='ranked'?'4V4 · TDM':'INVITE ONLY';
- $('mapHeading').textContent=mode==='public'||mode==='ranked'?'ARENA PREVIEW':'CHOOSE YOUR STARTING ARENA';
+ const picksStartingMap=mode==='custom'||mode==='ai';
+ $('startingMapPicker').hidden=$('heroMapSize').hidden=$('heroMapBadge').hidden=!picksStartingMap;
  $('heroMode').textContent=mode==='public'?ruleLabel($('playlist').value).toUpperCase():mode==='ai'?'VS AI':mode==='ranked'?'RANKED TDM':'CUSTOM ROOMS';
  updatePlaylistPreview(mode);
  $('roomError').textContent='';

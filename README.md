@@ -34,7 +34,7 @@ Each slot keeps its magazine and cooldown. Switching cancels reloads and unfinis
 
 ## Arenas
 
-The lobby map selector previews the chosen arena live and remembers the selection locally. Matches, practice, replay, spawn selection, scoreboard labels and results all use that arena.
+The starting-map picker appears in Vs AI and Custom Rooms. It previews your choice and remembers it locally. Quick Play and Ranked assign the starting arena through matchmaking.
 
 - Switchyard (small, 36 × 36): container lanes and a quick outer loop.
 - Dust Court (medium, 58 × 58): the original courtyard with mixed ranges.
