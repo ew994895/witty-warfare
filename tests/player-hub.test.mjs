@@ -83,3 +83,31 @@ test('team wins follow the team score and old round inputs do not create a new s
   match.time=60;
   assert.deepEqual(roundRecord(match,'two').players,[]);
 });
+
+test('five placements unlock rating, ranking is match-result based, and recording is idempotent',()=>{
+  const {db,hub}=hubFixture();
+  try{
+    const names=Array.from({length:8},(_,i)=>'ranked'+i);
+    for(const name of names)db.prepare('INSERT INTO profiles VALUES (?,?,?)').run(name,name,'fixture-'+name);
+    let now=10_000;
+    let winner;
+    for(let game=1;game<=5;game++){
+      const ids=names.map(handle=>hub.ranked.queue(handle,'join',now).matchId).filter(Boolean);
+      assert.equal(ids.length,1);
+      const id=ids[0],info=hub.ranked.info(id,names[0],now);
+      assert.equal(info.seats.length,8);
+      assert.equal(info.seats.filter(seat=>seat.team==='blue').length,4);
+      assert.equal(hub.ranked.info(id,'outsider',now),null);
+      assert.ok(hub.ranked.start(id,now));
+      winner=info.seats.find(seat=>seat.handle===names[0]).team;
+      hub.ranked.record({id,winner,abandoned:[]});
+      hub.ranked.record({id,winner,abandoned:[]});
+      assert.equal(hub.ranked.standing(names[0]).played,game);
+      assert.equal(hub.ranked.result(id,names[0]).played,game);
+      if(game<5)assert.equal(hub.ranked.standing(names[0]).rating,null);
+      now+=60_000;
+    }
+    assert.ok(hub.ranked.standing(names[0]).rating>1000);
+    assert.ok(hub.ranked.ladder().some(row=>row.handle===names[0]));
+  }finally{db.close();}
+});

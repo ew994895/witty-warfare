@@ -1,3 +1,4 @@
+import {RankedLadder} from './ranked.js';
 const DAY = 86_400_000;
 const WINDOW = 600_000;
 const HANDLE = /^[a-z0-9_]{3,16}$/;
@@ -54,6 +55,8 @@ export class PlayerHub {
       CREATE TABLE IF NOT EXISTS recorded_matches (id TEXT PRIMARY KEY);
     `);
   }
+
+  get ranked(){return this.ladder??=new RankedLadder(this.storage);}
 
   one(query, ...args) { return this.sql.exec(query, ...args).toArray()[0]; }
 
@@ -168,6 +171,17 @@ export class PlayerHub {
   async fetch(request) {
     const path = new URL(request.url).pathname;
     const method = request.method;
+    if (path.startsWith('/internal/ranked-') && method === 'POST') {
+      const body=await request.json();
+      if(path==='/internal/ranked-info'){
+        const info=this.ranked.info(body.id,body.handle);
+        return info?reply(info):fail('Ranked seat unavailable.',404);
+      }
+      if(path==='/internal/ranked-start')return reply({ok:this.ranked.start(body.id)});
+      if(path==='/internal/ranked-void'){this.ranked.void(body.id);return reply({ok:true});}
+      if(path==='/internal/ranked-record'){this.ranked.record(body);return reply({ok:true});}
+    }
+    if(path==='/ranked-ladder'&&method==='GET')return reply({ranks:this.ranked.ladder()});
     if (path === '/internal/record' && method === 'POST') return this.record(await request.json());
     if (path === '/internal/redeem' && method === 'POST') {
       const {ticket} = await request.json();
@@ -207,6 +221,8 @@ export class PlayerHub {
     const session = await this.authenticate(request);
     if (!session) return fail('Sign in to use your player account.', 401);
     const {handle,digest} = session;
+    if(path==='/ranked-queue'&&method==='POST')return reply(this.ranked.queue(handle,(await request.json()).action));
+    if(path==='/ranked-result'&&method==='POST')return reply({result:this.ranked.result((await request.json()).id,handle)});
     if (path === '/ticket' && method === 'POST') {
       const ticket = await this.issue(handle,'ticket',90_000,digest);
       return ticket ? reply({ticket}) : fail('Sign in again.',401);
@@ -218,6 +234,7 @@ export class PlayerHub {
     if (path === '/profile' && method === 'GET') {
       return reply({
         profile:this.profile(handle),
+        ranked:this.ranked.standing(handle),
         stats:this.sql.exec('SELECT * FROM stats WHERE handle=?',handle).toArray(),
         friends:this.friends(handle),
         invites:this.invites(handle)

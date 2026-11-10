@@ -1,4 +1,17 @@
 export const MAX_PLAYERS = 8;
+export const GAME_RULES = {ffa:'Free-for-all',tdm:'Team Deathmatch',gun:'Gun Game',storm:'Storm Survival'};
+export const GUN_ORDER = [0,3,4,5,2,1,6,7];
+export const STORM_LIVES = 3;
+
+export function gameRules(value) {
+  return Object.hasOwn(GAME_RULES,value) ? value : 'ffa';
+}
+
+export function stormRadius(map, elapsed, duration) {
+  const start=Math.hypot(map.half,map.half)+1;
+  const progress=Math.max(0,Math.min(1,(elapsed-15)/(duration-15)));
+  return start+(6-start)*progress;
+}
 export const TEAMS = ['blue', 'red'];
 export const TEAM_NAMES = {blue: 'Blue', red: 'Red'};
 export const TEAM_COLORS = {blue: 0x439dff, red: 0xff5659};
@@ -6,7 +19,7 @@ export const BOT_SKILLS = ['easy', 'normal', 'hard'];
 export const DIFFICULTIES = ['practice', ...BOT_SKILLS, 'mixed'];
 
 export function roomSettings(value = {}) {
-  const rules = value.rules === 'tdm' ? 'tdm' : 'ffa';
+  const rules = gameRules(value.rules);
   const capacities = rules === 'tdm' ? [2, 4, 6, 8] : [2, 3, 4, 5, 6, 7, 8];
   const maxPlayers = capacities.includes(value.maxPlayers) ? value.maxPlayers : MAX_PLAYERS;
   const teamSetup = rules === 'tdm' && value.teamSetup === 'humans-vs-bots' ? value.teamSetup : 'mixed';
@@ -20,7 +33,7 @@ export function roomSettings(value = {}) {
     botSkills: Array.from({length: MAX_PLAYERS - 1}, (_, i) =>
       DIFFICULTIES.includes(value.botSkills?.[i]) ? value.botSkills[i] : 'default'),
     duration: [120, 180, 300].includes(value.duration) ? value.duration : 180,
-    scoreLimit: [0, 10, 20, 30, 40, 50].includes(value.scoreLimit) ? value.scoreLimit : rules === 'tdm' ? 30 : 0,
+    scoreLimit: rules==='gun'||rules==='storm'?0:[0, 10, 20, 30, 40, 50].includes(value.scoreLimit) ? value.scoreLimit : rules === 'tdm' ? 30 : 0,
     friendlyFire: rules === 'tdm' && value.friendlyFire === true,
     respawnTime: [1.25, 2.5, 4].includes(value.respawnTime) ? value.respawnTime : 1.25
   };

@@ -1,10 +1,10 @@
 import {Match} from './server/match.js';
 import {QuickPlay} from './server/quick-play.js';
-import {roomSettings} from './dist/rules.js';
+import {gameRules,roomSettings,teamWinner} from './dist/rules.js';
 import {playerHub} from './server/player-hub.js';
 import {roundRecord} from './server/round-record.js';
 export {PlayerHub} from './server/player-hub.js';
-const accountPaths=new Set(['create','sign-in','sign-out','profile','ticket','friends','invites','rankings']);
+const accountPaths=new Set(['create','sign-in','sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result']);
 
 async function accountRequest(request, env, path, origin){
   const headers=new Headers();
@@ -58,6 +58,9 @@ async function withPlayerIdentity(request, env){
   }
   return new Request(url,{method:request.method,headers});
 }
+const rankedRequest=(env,action,body)=>playerHub(env).fetch('https://players/internal/ranked-'+action,{
+  method:'POST',body:JSON.stringify(body)
+});
 const sessionId=req=>new URL(req.url).searchParams.get('session');
 const validSession=id=>/^[a-zA-Z0-9-]{20,64}$/.test(id||'');
 async function playerId(roomId, session){
@@ -76,13 +79,20 @@ export default {async fetch(req,env){const url=new URL(req.url);if(!url.pathname
  if(req.headers.get('Upgrade')?.toLowerCase()==='websocket'){
    req=await withPlayerIdentity(req,env);
    if(!req)return json({error:'Play ticket expired'},401,origin);
+   const ranked=url.pathname.match(/^\/api\/ranked\/([a-f0-9-]{36})\/socket$/);
+   if(ranked){
+     const handle=req.headers.get('X-Witty-Account');
+     if(!handle)return json({error:'Sign in to play Ranked'},401,origin);
+     return env.ROOMS.get(env.ROOMS.idFromName('ranked:'+ranked[1])).fetch(req);
+   }
    const custom=url.pathname.match(/^\/api\/rooms\/([A-Z2-9]{8})\/socket$/);
    if(custom)return env.ROOMS.get(env.ROOMS.idFromName(custom[1])).fetch(req);
    const publicRoom=url.pathname.match(/^\/api\/quick-play\/([a-f0-9-]{36})$/);
    if(publicRoom)return env.ROOMS.get(env.ROOMS.idFromName('public:'+publicRoom[1])).fetch(req);
    if(url.pathname==='/api/quick-play'){
      if(!validSession(sessionId(req)))return json({error:'Invalid session'},400,origin);
-     const directory=url.searchParams.get('rules')==='tdm'?'public-directory-tdm':'public-directory';
+     const rules=gameRules(url.searchParams.get('rules'));
+     const directory=rules==='ffa'?'public-directory':'public-directory-'+rules;
      return env.ROOMS.get(env.ROOMS.idFromName(directory)).fetch(req);
    }
  }
@@ -116,6 +126,25 @@ export class ArenaRoom{
   }
   const account=req.headers.get('X-Witty-Account');
   const name=account?decodeURIComponent(req.headers.get('X-Witty-Callsign')):url.searchParams.get('name');
+  if(url.pathname.startsWith('/api/ranked/')){
+    if(!account)return Response.json({error:'Sign in to play Ranked'},{status:401});
+    const id=url.pathname.split('/')[3];
+    const response=await rankedRequest(this.env,'info',{id,handle:account});
+    if(!response.ok)return response;
+    const info=await response.json();
+    if(info.state==='playing'&&(!this.match||this.match.phase==='staging')){
+      if(!this.rankedStarting){
+        if(await this.ctx.storage.get('report:'+id))return Response.json({error:'Ranked result is being saved.'},{status:409});
+        await rankedRequest(this.env,'void',{id});
+        return Response.json({error:'The ranked match was interrupted.'},{status:410});
+      }
+    }
+    if(!this.config){
+      const config={ranked:true,rankedId:id,rules:'tdm',botCount:0,mapId:info.map,seats:info.seats,deadline:info.deadline};
+      this.config=config;
+      this.match=new Match(config);
+    }
+  }
   const id=await playerId(this.ctx.id.toString(),account?'account:'+account:session);
   this.expireSeats(Date.now());
   const idlePublic=this.config?.public&&!this.clients.size&&!this.disconnected.size;
@@ -143,10 +172,9 @@ export class ArenaRoom{
     this.match.leave(id);
   }else{
     this.disconnected.set(id,Date.now()+15000);
-    const actor=this.match.actors.find(a=>a.id===id);
-    if(actor)actor.queue=[];
+    this.match.disconnect(id);
   }
-  if(!this.clients.size){clearInterval(this.clock);this.clock=null;}
+  if(!this.clients.size&&(!this.match.ranked||this.match.phase==='results'))this.stopClock();
  };
  socket.addEventListener('close',close);
  socket.addEventListener('error',close);
@@ -154,8 +182,31 @@ export class ArenaRoom{
  state.roomId=roomId;
  socket.send(JSON.stringify(this.welcome(id,a.arsenal,this.match.snapshot(),roomId)));
  this.startClock();
+ if(this.match.ranked&&this.clients.size===this.config.seats.length&&!this.rankedStarting&&this.match.phase==='staging'){
+   this.rankedStarting=true;
+   this.ctx.waitUntil(this.startRanked());
+ }
  return new Response(null,{status:101,webSocket:client});
  }
+ async startRanked(){
+  const id=this.config.rankedId;
+  try{
+    const response=await rankedRequest(this.env,'start',{id});
+    if(!(await response.json()).ok||!this.match.startRanked()){
+      await this.cancelRanked();
+    }else{
+      for(const actorId of this.disconnected.keys())this.match.disconnect(actorId);
+    }
+  }catch{
+    await this.cancelRanked();
+  }finally{this.rankedStarting=false;}
+ }
+ async cancelRanked(){
+  this.stopClock();
+  for(const {socket} of this.clients.values())socket.close(4004,'Ranked match cancelled');
+  await rankedRequest(this.env,'void',{id:this.config.rankedId});
+ }
+ stopClock(){clearInterval(this.clock);this.clock=null;}
  expireSeats(now){
   for(const [id,expiry] of this.disconnected){
     if(now<expiry)continue;
@@ -178,8 +229,11 @@ export class ArenaRoom{
   const match=this.match;
   if(match.phase!=='results'||this.reportedRound===match.round)return;
   this.reportedRound=match.round;
-  const report=roundRecord(match,crypto.randomUUID());
-  if(!report.players.length)return;
+  const report=match.ranked?{
+    id:this.config.rankedId,ranked:true,winner:teamWinner(match.teamScores),
+    abandoned:match.humans().filter(actor=>actor.abandoned).map(actor=>actor.account)
+  }:roundRecord(match,crypto.randomUUID());
+  if(!report.ranked&&!report.players.length)return;
   this.ctx.waitUntil(Promise.all([
     this.ctx.storage.put('report:'+report.id,report),
     this.ctx.storage.setAlarm(Date.now()+1000)
@@ -190,15 +244,21 @@ export class ArenaRoom{
   // Arm the retry before contacting the hub so an interrupted flush can resume.
   if(reports.size)await this.ctx.storage.setAlarm(Date.now()+30_000);
   for(const [key,report] of reports){
-    const result=await playerHub(this.env).fetch('https://players/internal/record',{
+    const result=await playerHub(this.env).fetch('https://players/internal/'+(report.ranked?'ranked-record':'record'),{
       method:'POST',body:JSON.stringify(report)
     });
     if(!result.ok)throw new Error('Could not save match result');
     await this.ctx.storage.delete(key);
   }
  }
- startClock(){if(this.clock)return;this.previous=Date.now();this.accumulator=0;this.clock=setInterval(()=>{const now=Date.now();this.accumulator+=Math.min((now-this.previous)/1000,.1);this.previous=now;this.expireSeats(now);while(this.accumulator>=1/120){this.match.step();this.accumulator-=1/120;}this.recordCompletedRound();const waiting=!this.match.public&&this.match.phase==='results';
- if(this.lastRound!==this.match.round||waiting!==Boolean(this.config.intermission))this.persistConfig();
+ startClock(){if(this.clock)return;this.previous=Date.now();this.accumulator=0;this.clock=setInterval(()=>{const now=Date.now();this.accumulator+=Math.min((now-this.previous)/1000,.1);this.previous=now;
+ if(this.match.ranked&&this.match.phase==='staging'&&now>=this.config.deadline&&!this.rankedStarting){
+   this.ctx.waitUntil(this.cancelRanked());
+   return;
+ }
+ this.expireSeats(now);while(this.accumulator>=1/120){this.match.step();this.accumulator-=1/120;}this.recordCompletedRound();const waiting=!this.match.public&&this.match.phase==='results';
+ if(this.match.ranked&&!this.clients.size&&waiting){this.stopClock();return;}
+ if(!this.match.ranked&&(this.lastRound!==this.match.round||waiting!==Boolean(this.config.intermission)))this.persistConfig();
  if(waiting&&now<(this.nextResultsSnapshot??0))return;
  this.nextResultsSnapshot=waiting?now+125:0;
  const snapshot=this.match.snapshot();for(const [id,c]of this.clients){const actor=this.match.actors.find(a=>a.id===id);try{if(c.round!==this.match.round){c.round=this.match.round;c.eventId=this.match.eventId;c.socket.send(JSON.stringify(this.welcome(id,actor?.arsenal,snapshot,c.roomId)));continue;}if(!c.probeTime||now-c.probeTime>3000){c.probe=crypto.randomUUID();c.probeTime=now;c.socket.send(JSON.stringify({type:'probe',n:c.probe}));}c.socket.send(JSON.stringify({type:'snapshot',...snapshot,arsenal:actor?.arsenal,events:this.match.events.filter(e=>e.n>c.eventId)}));c.eventId=this.match.eventId;}catch{c.socket.close();}}},1000/30);}

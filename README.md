@@ -16,7 +16,7 @@ WASD moves; hold Space for bunny hops; tap Shift before landing for slide boosts
 
 Normal browsers use Pointer Lock. Embedded browsers that reject it use relative cursor movement plus continuous horizontal turning near the screen edges. M retries pointer lock. Fullscreen is available when supported by the browser.
 
-All three play options support Free-for-all and Team Deathmatch. They share hitscan, headshot bonuses, streak tracking, brief spawn protection, and delayed health regeneration. Vs AI runs locally with five bots. Its optional aim practice difficulty disables bot movement and fire.
+Quick Play, Vs AI, and Custom Rooms support Free-for-all and Team Deathmatch. They share hitscan, headshot bonuses, streak tracking, brief spawn protection, and delayed health regeneration. Vs AI runs locally with five bots. Its optional aim practice difficulty disables bot movement and fire.
 
 ## Source layout
 
@@ -45,7 +45,7 @@ The lobby map selector previews the chosen arena live and remembers the selectio
 
 ## Play options
 
-- **Public Online** starts Quick Play. New guests join a live public match with room when one is available. A new match starts with bots immediately when a seat is unavailable. Public rounds are three minutes at regular difficulty. Free-for-all and 4v4 Team Deathmatch use separate matchmaking pools.
+- **Public Online** starts Quick Play. New guests join a live public match with room when one is available. A new match starts with bots immediately when a seat is unavailable. Public rounds are three minutes at regular difficulty. Each Quick Play mode has its own matchmaking pool.
 - **Vs AI** runs offline. Choose your starting arena, round length, and bot difficulty before playing.
 - **Custom Rooms** uses an eight-character invite code or link. The creator chooses the starting arena and can expand **Customize room** to set the game rules, round length, slots, bot count and difficulty, kill limit, and respawn delay. Team Deathmatch also offers friendly fire and Humans vs Bots.
 
@@ -83,3 +83,17 @@ Signed-in players who participate for at least 15 seconds and stay through the e
 Add friends by their exact @handle. Accept, decline, cancel, or remove connections in **Friends**. In a Custom Room, use **Invite a Friend** from the pause or results screen to send an invite to an accepted friend. They can join from their Friends inbox. Invites expire after 20 minutes.
 
 The SQLite-backed Player Hub is deployed as a separate Durable Object. The room server saves completed results to its outbox and retries delivery; match IDs prevent duplicate totals. Run `node tests/accounts.integration.mjs` against a local Worker for account, invite, and completed-match checks. Use Node 22.13 or newer for the SQLite regression fixture.
+
+## Quick Play and Ranked
+
+**Quick Play** has separate Free-for-all, Team Deathmatch, Gun Game, and Storm Survival playlists. Guests can join in progress, and bots fill open seats. The vote lasts 15 seconds and the lobby carries forward. The existing public eliminations leaderboard is called **Quick Play eliminations** in Player Hub.
+
+**Ranked** is a signed-in, solo 4v4 Team Deathmatch queue. It waits for eight humans, balances the teams by rating, and selects a map from the arena pool. The assigned players have 35 seconds to connect. A match that fails to start leaves ratings unchanged. An active match keeps each player's seat open for reconnects. Leaving and staying away can count as a loss. Ranked ends at the normal TDM time or kill limit and returns a rating result. Select **Queue Ranked Again** to play another match.
+
+Five completed placement matches unlock a player's visible rating and eligibility for the Ranked ladder. Each result updates a player's rating based on the team outcome and expected result from the teams' average ratings. Personal kills and accuracy do not affect rating.
+
+**Gun Game** starts everyone on Ranger and advances the weapon after each elimination. The eighth stage is the knife. Complete that stage to win early, or finish with the highest weapon stage when time expires.
+
+**Storm Survival** gives each player three lives and a safe zone that starts shrinking after 15 seconds. The storm damages players outside the ring. Players who join after the grace period wait for the next round. The last survivor wins. At the time limit, remaining lives and then eliminations break ties.
+
+Custom Rooms can switch to Gun Game or Storm Survival in Host controls between matches. Run `node tests/ranked.integration.mjs` against a fresh local Worker to verify eight-player matchmaking, reserved reconnects, new playlists, and saved Ranked results.

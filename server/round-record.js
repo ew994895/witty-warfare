@@ -6,10 +6,10 @@ export function roundRecord(match, id) {
   const soloWinner = first && (!second || order(first,second) < 0) ? first : null;
   const winningTeam = teamWinner(match.teamScores);
   const players = match.humans()
-    .filter(actor => actor.account && match.time - actor.joinedAt >= 15 && actor.received > actor.roundStartInput)
+    .filter(actor => actor.account && !actor.waitingForRound && match.time - actor.joinedAt >= 15 && actor.received > actor.roundStartInput)
     .map(actor => ({
       handle: actor.account,
-      won: match.settings.rules === 'tdm' ? actor.team === winningTeam : soloWinner === actor,
+      won: match.settings.rules === 'tdm' ? actor.team === winningTeam : match.settings.rules==='ffa' ? soloWinner === actor : actor.id===match.roundWinner,
       kills: actor.kills,
       humanKills: actor.humanKills || 0,
       deaths: actor.deaths,

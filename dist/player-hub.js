@@ -166,6 +166,9 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       const data = await api('profile');
       if(session!==activeSession)return;
       setProfile(data.profile);
+      const ranked=data.ranked;
+      $('hubStanding').textContent=ranked.rating===null?`Ranked placement · ${ranked.played}/${ranked.placements} matches`:
+        `Ranked rating ${ranked.rating} · ${ranked.wins} wins`;
       renderStats(data.stats);
       renderFriends(data.friends);
       renderInvites(data.invites);
@@ -186,14 +189,19 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     }
     for(const name of ['Profile','Friends','Rankings'])$('hub'+name).hidden = name.toLowerCase()!==tab;
     if(tab==='rankings'){
-      const list = $('hubRankList');
+      const list=$('hubRankList');
+      const kind=$('rankingKind').value;
+      const competitive=kind==='ranked-ladder';
+      $('rankingDescription').textContent=competitive
+        ?'Top 25 by TDM rating. Complete five placement matches to appear.'
+        :'Top 25 by human eliminations in Quick Play. Wins break ties.';
       list.replaceChildren();
       try{
-        const {ranks} = await api('rankings');
-        if(section!==tab)return;
-        if(!ranks.length)status('The leaderboard opens as players record their first public eliminations.');
+        const {ranks}=await api(kind);
+        if(section!==tab||$('rankingKind').value!==kind)return;
+        if(!ranks.length)status(competitive?'No players have completed placements yet.':'No public eliminations have been recorded yet.');
         list.replaceChildren(...ranks.map(row=>element('li',
-          `${row.name} · @${row.handle} — ${row.eliminations} eliminations · ${row.wins} wins`)));
+          `${row.name} · @${row.handle} — ${competitive?row.rating+' rating':row.eliminations+' eliminations'} · ${row.wins} wins`)));
       }catch(error){if(section===tab)status(error.message);}
     }else await refresh();
   }
@@ -275,6 +283,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     inboxTimer=setInterval(()=>{if(section==='friends'&&session)refresh();},10_000);
   }
   $('openPlayerHub').onclick = () => open();
+  $('rankingKind').onchange=()=>select('rankings');
   $('closePlayerHub').onclick = () => dialog.close();
   dialog.addEventListener('close',()=>clearInterval(inboxTimer));
   for(const button of dialog.querySelectorAll('[data-hub-tab]'))button.onclick = () => select(button.dataset.hubTab);
@@ -282,6 +291,8 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
 
   return {
     open,
+    queueRanked:action=>api('ranked-queue','POST',{action}),
+    rankedResult:id=>api('ranked-result','POST',{id}),
     async ticket() {
       if(!session)return undefined;
       try{return (await api('ticket','POST')).ticket;}

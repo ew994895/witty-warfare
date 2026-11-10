@@ -93,3 +93,12 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .hub-ranks{padding-left:24px}
 .hub-ranks li{padding:7px 4px;border-bottom:1px solid #78936b55}
 @media(max-width:530px){.lobby-actions{gap:3px}.lobby-actions .icon-button{font-size:8px;padding:5px}#openPlayerHub{max-width:85px}.player-hub{padding:15px}}
+
+.match-panel .mode-options{grid-template-columns:repeat(4,minmax(0,1fr))}
+#cancelRanked{width:100%;margin-top:8px}
+#modeHud{position:absolute;top:87px;left:50%;transform:translateX(-50%);white-space:nowrap}
+#modeHud span.danger{color:#ffd3e9;border-color:#f971bb}
+#hud:has(#modeHud:not([hidden])) #mouseNotice{top:138px}
+#rankedResult,#hubStanding{color:var(--yellow);font-weight:700}
+.hub-rank-select{display:block;margin-top:14px;color:#c5d6bd;font-size:12px}
+.hub-rank-select select{padding:7px;margin-left:6px;color:inherit;background:#172a23;border:1px solid #78936b80}

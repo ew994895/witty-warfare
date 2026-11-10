@@ -1,4 +1,4 @@
-import {DIFFICULTIES,roomSettings} from './rules.js';
+import {DIFFICULTIES,GAME_RULES,roomSettings} from './rules.js?v=11';
 
 const skillLabels = {
   default: 'Use room difficulty',
@@ -30,7 +30,7 @@ export function createRoomControls(container) {
     labels[key] = label;
   }
 
-  field('rules', 'Game rules', [['ffa', 'Free-for-all'], ['tdm', 'Team Deathmatch']]);
+  field('rules', 'Game rules', Object.entries(GAME_RULES));
   field('maxPlayers', 'Total slots', choices([2, 3, 4, 5, 6, 7, 8]));
   field('botCount', 'Bots', [[-1, 'Fill open slots'], ...choices([0, 1, 2, 3, 4, 5, 6, 7])]);
   field('difficulty', 'Bot difficulty', DIFFICULTIES.map(skill => [skill, skillLabels[skill]]));
@@ -72,6 +72,7 @@ export function createRoomControls(container) {
     for (const option of fields.maxPlayers.options) option.disabled = tdm && +option.value % 2 !== 0;
     for (const option of fields.botCount.options) option.disabled = +option.value > maxBots;
     for (const key of ['teamSetup', 'friendlyFire']) labels[key].hidden = !tdm;
+    labels.scoreLimit.hidden=settings.rules==='gun'||settings.rules==='storm';
     for (const key of ['rules', 'maxPlayers', 'botCount', 'difficulty', 'duration', 'scoreLimit', 'teamSetup', 'respawnTime']) {
       fields[key].value = settings[key];
     }
