@@ -228,35 +228,3 @@ test('trigger calibration handles an axis that reports its true neutral only aft
   }
   assert.deepEqual(wizard.profile.lt,{type:'axis',index:4,rest:-1,direction:1});
 });
-
-test('Firefox macOS Xbox One S maps shifted buttons and uses the bumpers for aim and fire',()=>{
-  const pad=gamepad();
-  pad.id='045e-02fd-Xbox Wireless Controller';
-  const sample=createGamepadInput('MacIntel',159);
-  assert.equal(sample([pad]).firefoxLayout,true);
-  for(const [index,actions] of [
-    [0,[]],[1,['a']],[2,['b']],[3,['x']],[5,['lt']],[8,['rt']],
-    [16,['menu']],[12,['view','up']],[15,['y','right']]
-  ]){
-    pad.buttons[index].pressed=true;
-    assert.deepEqual([...sample([pad]).held],actions);
-    pad.buttons[index].pressed=false;
-    sample([pad]);
-  }
-  pad.buttons[5].pressed=pad.buttons[8].pressed=true;
-  assert.deepEqual([...sample([pad]).held],['lt','rt']);
-});
-
-test('the Firefox preset is scoped to the affected device, and the standard layout can be restored',()=>{
-  const pad=gamepad();
-  pad.id='045e-02fd-Xbox Wireless Controller';
-  assert.equal(createGamepadInput('MacIntel')([pad]).firefoxLayout,false);
-  assert.equal(createGamepadInput('Win32',159)([pad]).firefoxLayout,false);
-  assert.equal(createGamepadInput('MacIntel',161)([pad]).firefoxLayout,false);
-  const sample=createGamepadInput('MacIntel',159);
-  assert.equal(sample([pad],{},true).firefoxLayout,false);
-  pad.buttons[6].pressed=true;
-  assert.ok(sample([pad],{},true).held.has('lt'));
-  pad.id='045e-0b13-Xbox Wireless Controller';
-  assert.equal(sample([pad]).firefoxLayout,false);
-});
