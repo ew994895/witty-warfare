@@ -29,7 +29,23 @@ const XBOX_02FD_MAC={
   down:{type:'hat',index:9,target:1/7},left:{type:'hat',index:9,target:5/7}
 };
 
-export function defaultGamepadProfile(pad,platform='') {
+// Firefox's macOS HID path drops the trigger axes on this controller. It also
+// counts the Guide element before the face buttons, then applies its remapper.
+const XBOX_02FD_FIREFOX_MAC={
+  ...STANDARD_PROFILE,
+  a:buttonBinding(1),b:buttonBinding(2),x:buttonBinding(3),
+  lb:null,rb:null,lt:buttonBinding(5),rt:buttonBinding(8),
+  y:STANDARD_PROFILE.right,view:STANDARD_PROFILE.up,menu:buttonBinding(16)
+};
+
+function isFirefoxXboxLayout(pad,platform,firefoxVersion){
+  return /^Mac/i.test(platform) && firefoxVersion>0 && firefoxVersion<=160
+    && /^0?45e-0?2fd-/i.test(pad.id) && pad.mapping==='standard'
+    && pad.axes.length===4 && pad.buttons.length===17;
+}
+
+export function defaultGamepadProfile(pad,platform='',firefoxVersion=0) {
+  if(isFirefoxXboxLayout(pad,platform,firefoxVersion))return XBOX_02FD_FIREFOX_MAC;
   if (/^Mac/i.test(platform) && /0?45e.*0?2fd/i.test(pad.id) && pad.axes.length===10 && pad.buttons.length>=17) {
     return XBOX_02FD_MAC;
   }
@@ -67,14 +83,14 @@ function mappedValue(pad, binding) {
   return axisValue(pad,binding,false);
 }
 
-export function createGamepadInput(platform) {
+export function createGamepadInput(platform,firefoxVersion) {
   let device = null;
   let mapping;
   let previous = new Set();
   let blocked = new Set();
   const bipolarTriggers=new Set();
 
-  return function sample(pads, profiles = {}) {
+  return function sample(pads, profiles = {}, useStandard = false) {
     const available = Array.from(pads).filter(pad => pad?.connected);
     const pad = available.find(pad => pad.index === device?.index)
       ?? available.find(pad => profiles[gamepadKey(pad)] || defaultGamepadProfile(pad,platform))
@@ -85,8 +101,10 @@ export function createGamepadInput(platform) {
     }
 
     const key = gamepadKey(pad);
-    const fallback = defaultGamepadProfile(pad,platform);
-    const profile = profiles[key] ?? fallback;
+    const firefoxCompatible=isFirefoxXboxLayout(pad,platform,firefoxVersion);
+    const fallback = defaultGamepadProfile(pad,platform,useStandard ? 0 : firefoxVersion);
+    const firefoxLayout=fallback===XBOX_02FD_FIREFOX_MAC;
+    const profile = firefoxLayout ? fallback : profiles[key] ?? fallback;
     const ready = Boolean(profile);
     const connected = device?.index !== pad.index || device?.key !== key || mapping !== profile;
     if (connected) {
@@ -119,7 +137,7 @@ export function createGamepadInput(platform) {
     const axes = STICK_NAMES.map(name => axisValue(pad,profile?.[name],true));
     const [side,back] = stick(axes[0],axes[1]);
     const [lookX,lookY] = stick(axes[2],axes[3],1.7);
-    return {pad,key,profile,fallback,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
+    return {pad,key,profile,firefoxCompatible,firefoxLayout,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
       active:Boolean(held.size || side || back || lookX || lookY)};
   };
 }

@@ -5,7 +5,7 @@ import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,TEAMS,TEAM_NAMES,TEAM_COLORS,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js?v=12';
 import {createPlayerHub} from './player-hub.js?v=12';
 import {createObjectiveDisplay} from './objectives-ui.js?v=12';
-import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=18';
+import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=19';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
 import {createRoomControls} from './room-controls.js?v=12';
 import {STEP,WEAPONS,PRIMARY_COUNT,PISTOL,KNIFE,meleeTrace,clamp,damp,createPlayer,stepMovement,moveBody,overlap,createArsenal,switchWeapon,startReload,tickArsenal,fireRound,trace,createNav} from './core.js';
@@ -66,7 +66,8 @@ if(Number.isInteger(prefs.primary)&&prefs.primary>=0&&prefs.primary<PRIMARY_COUN
 function savePrefs(){try{localStorage.setItem('voxel-strike-v2',JSON.stringify(prefs))}catch{}}
 
 const controllerPlatform=navigator.platform;
-const sampleGamepad=createGamepadInput(controllerPlatform);
+const firefoxVersion=Number(navigator.userAgent.match(/Firefox\/(\d+)/)?.[1])||0;
+const sampleGamepad=createGamepadInput(controllerPlatform,firefoxVersion);
 const controllerProfiles=prefs.controllerProfilesV2??={};
 let controller=null,controllerActive=false;
 let soloVote=null,soloVoteEnds=0,captureOnClick=false;
@@ -315,7 +316,7 @@ function start(nextMap){if(online)return;if(nextMap)selectMap(nextMap,false);res
  }
  player.yaw=Math.atan2(player.x,player.z);
  if(difficulty==='practice'){[player.x,player.z]=activeMap.practice[0];[bots[0].x,bots[0].z]=activeMap.practice[1];player.yaw=Math.atan2(player.x-bots[0].x,player.z-bots[0].z);}
- arsenal=createArsenal(selected);ads=kick=gunKick=bloom=hitTime=damageTime=0;buildGun();state='playing';$('lobby').hidden=$('pause').hidden=$('results').hidden=true;$('hud').hidden=false;document.body.classList.add('playing');canvas.focus();window.scrollTo(0,0);initAudio();if(nextMap||controllerActive)armMouseCapture();else requestLock();message(nextMap?'NEW ROUND':activeMap.name.toUpperCase(),`${nextMap?activeMap.name+' · ':''}${activeMap.size} · ${difficulty==='practice'?'AIM PRACTICE':ruleLabel(rules).toUpperCase()}${controllerActive?' · Hold RB + tap LB to slide-hop':' · Hold SPACE + tap SHIFT to slide-hop'}`,4);updateHud();}
+ arsenal=createArsenal(selected);ads=kick=gunKick=bloom=hitTime=damageTime=0;buildGun();state='playing';$('lobby').hidden=$('pause').hidden=$('results').hidden=true;$('hud').hidden=false;document.body.classList.add('playing');canvas.focus();window.scrollTo(0,0);initAudio();if(nextMap||controllerActive)armMouseCapture();else requestLock();message(nextMap?'NEW ROUND':activeMap.name.toUpperCase(),`${nextMap?activeMap.name+' · ':''}${activeMap.size} · ${difficulty==='practice'?'AIM PRACTICE':ruleLabel(rules).toUpperCase()}${controllerActive?(controller?.firefoxLayout?' · Hold A + tap B to slide-hop':' · Hold RB + tap LB to slide-hop'):' · Hold SPACE + tap SHIFT to slide-hop'}`,4);updateHud();}
 function pause(){if(state!=='playing')return;$('pauseLoadoutSection').hidden=rules==='gun'||player.inactive;state='paused';resetTransient();$('pause').hidden=false;$('leaderboard').hidden=true;syncMatchLoadout();renderRoomControls();if(document.pointerLockElement)document.exitPointerLock();}
 function resume(){if(state!=='paused')return;resetTransient();state='playing';$('pause').hidden=true;canvas.focus();initAudio();if(controllerActive)armMouseCapture();else requestLock();}
 function lobby(){if(online)leaveOnline();state='lobby';rules='ffa';player.team=null;objectiveDisplay.sync(rules,null,player);for(const bot of bots){bot.team=null;colorAvatar(bot);}renderRoomControls();resetTransient();if(document.pointerLockElement)document.exitPointerLock();$('lobby').hidden=false;$('pause').hidden=$('results').hidden=$('hud').hidden=true;document.body.classList.remove('playing','aiming','scoped');camera.fov=prefs.fov;camera.updateProjectionMatrix();const startingMap=getMap(prefs.mapId).id;if(activeMap.id!==startingMap)selectMap(startingMap,false);else{clearEffects();resetLobbyPreview();}syncLoadout();}
@@ -374,7 +375,7 @@ function updateScoresVisibility(){
  $('leaderboard').hidden=state!=='playing'||!(keys.has('Tab')||padHeld('view'));
 }
 function updateHud(){const w=WEAPONS[arsenal.index];$('pauseBtn').textContent=controllerActive?'MENU / PAUSE':'ESC / PAUSE';$('health').textContent=Math.ceil(player.hp);$('healthBar').style.width=player.hp+'%';$('ammo').textContent=w.mode==='melee'?'MELEE':arsenal.mags[arsenal.index];$('ammo').classList.toggle('melee-ammo',w.mode==='melee');$('reserve').textContent=w.mode==='melee'?'':` / ${w.mag}`;$('gunName').textContent=w.name;$('callsign').textContent=player.name.toUpperCase();$('kills').textContent=player.kills;$('points').textContent=player.score;$('streak').textContent=`${streak} STREAK`;$('timer').textContent=Math.floor(remaining/60)+':'+String(Math.floor(remaining%60)).padStart(2,'0');$('speed').textContent=Math.round(Math.hypot(player.vx,player.vz)*10);$('movementState').textContent=player.slide>0?'SLIDING':!player.grounded?'AIRBORNE':player.crouch>.5?'CROUCHED':'SPEED';
- $('reloadLabel').textContent=w.mode==='melee'?'SLASH · 65 DAMAGE · 2.2m REACH':arsenal.reloading>0?'RELOADING…':controllerActive?'RT FIRE · X RELOAD':arsenal.mags[arsenal.index]===0?'R TO RELOAD':w.mode==='semi'?'CLICK TO FIRE · R RELOAD':w.mode==='burst'?'3 ROUNDS / CLICK · R RELOAD':'HOLD TO FIRE · R RELOAD';for(let n=0;n<3;n++){const slot=$('slot'+n),id=arsenal.slots[n];slot.hidden=id===undefined;if(slot.hidden)continue;slot.classList.toggle('active',id===arsenal.index);slot.textContent=`${controllerActive?'':n===1?'2 / E':n===2?'3 / Q':'1'}  ${WEAPONS[id].name}`;}$('reloadProgress').style.transform=`scaleX(${arsenal.reloading>0?1-arsenal.reloading/w.reload:0})`;$('spawnProtection').hidden=player.shield===0||player.dead>0;
+ $('reloadLabel').textContent=w.mode==='melee'?'SLASH · 65 DAMAGE · 2.2m REACH':arsenal.reloading>0?'RELOADING…':controllerActive?(controller?.firefoxLayout?'RB FIRE · X RELOAD':'RT FIRE · X RELOAD'):arsenal.mags[arsenal.index]===0?'R TO RELOAD':w.mode==='semi'?'CLICK TO FIRE · R RELOAD':w.mode==='burst'?'3 ROUNDS / CLICK · R RELOAD':'HOLD TO FIRE · R RELOAD';for(let n=0;n<3;n++){const slot=$('slot'+n),id=arsenal.slots[n];slot.hidden=id===undefined;if(slot.hidden)continue;slot.classList.toggle('active',id===arsenal.index);slot.textContent=`${controllerActive?'':n===1?'2 / E':n===2?'3 / Q':'1'}  ${WEAPONS[id].name}`;}$('reloadProgress').style.transform=`scaleX(${arsenal.reloading>0?1-arsenal.reloading/w.reload:0})`;$('spawnProtection').hidden=player.shield===0||player.dead>0;
  $('killsLabel').textContent=isTeamGame(rules)?'YOUR ELIMINATIONS':'ELIMINATIONS';
  renderTeamTally('teamHud',true);
  renderModeTally();
@@ -1067,7 +1068,7 @@ function controllerMenu(){
   return;
  }
  if(controller.pressed('a')){
-  if(modal===lobbySettings&&controllerSetup.open&&!['fullscreen','controllerTestToggle'].includes(focused.id))return;
+  if(modal===lobbySettings&&controllerSetup.open&&!['fullscreen','controllerTestToggle','firefoxStandardLayout'].includes(focused.id))return;
   const target=current>=0?focused:primary;
   if(target?.matches('button,summary,input[type="checkbox"]'))target.click();
  }
@@ -1079,6 +1080,14 @@ const controllerSticks=$('controllerSticks');
 const controllerPreview=$('controllerPreview');
 const controllerBinding=$('controllerBinding');
 const rebindButton=$('rebindController');
+const firefoxStandardLayout=$('firefoxStandardLayout');
+firefoxStandardLayout.checked=Boolean(prefs.firefoxStandardLayout);
+firefoxStandardLayout.onchange=()=>{
+ prefs.firefoxStandardLayout=firefoxStandardLayout.checked;
+ savePrefs();
+ cancelCalibration();
+ sampleGamepad([]);
+};
 for(const [name,label] of CALIBRATION_STEPS){
  controllerBinding.add(new Option(label,name));
 }
@@ -1090,17 +1099,18 @@ const testButtons=CALIBRATION_STEPS.slice(0,14).map(([name,label])=>{
  const chip=document.createElement('span');
  chip.textContent=label.split(' (')[0];
  controllerTest.append(chip);
- return [name,chip];
+ return [name,chip,chip.textContent];
 });
 let calibration=null;
 function showCalibration(hint=''){
  const step=$('controllerStep'),status=$('controllerStepHint');
  step.hidden=status.hidden=cancelCalibrationButton.hidden=!calibration;
- calibrateButton.hidden=Boolean(calibration);
- resetMappingButton.hidden=Boolean(calibration||!controllerProfiles[controller?.key]);
+ const firefoxLayout=controller?.firefoxLayout;
+ calibrateButton.hidden=Boolean(calibration||firefoxLayout);
+ resetMappingButton.hidden=Boolean(calibration||firefoxLayout||!controllerProfiles[controller?.key]);
  controllerTest.hidden=controllerPreview.hidden=!controller?.ready;
  $('controllerSignals').hidden=!controller;
- $('controllerBindingLabel').hidden=rebindButton.hidden=Boolean(calibration||!controller?.ready);
+ $('controllerBindingLabel').hidden=rebindButton.hidden=Boolean(calibration||firefoxLayout||!controller?.ready);
  rebindButton.disabled=!controllerBinding.value;
  skipViewButton.hidden=calibration?.session.step?.[0]!=='view';
  if(!calibration)return;
@@ -1142,8 +1152,23 @@ resetMappingButton.onclick=()=>{
 function updateControllerSetup(){
  const saved=Boolean(controllerProfiles[controller?.key]);
  calibrateButton.disabled=!controller;
+ $('firefoxLayoutSetting').hidden=!controller?.firefoxCompatible;
+ const firefoxLayout=controller?.firefoxLayout;
+ $('controllerFireHelp').textContent=firefoxLayout?'LB aim · RB fire':'LT aim · RT fire';
+ $('controllerActionHelp').textContent=firefoxLayout
+   ? 'A jump · B slide · X reload · D-pad right swap weapon'
+   : 'A / RB jump · B / LB slide · X reload · Y swap weapon';
+ $('controllerMenuHelp').textContent=firefoxLayout
+   ? 'D-pad up scores · Menu pause · D-pad browse · A select'
+   : 'View scores · Menu pause · D-pad browse · A select';
+ const firefoxLabels={lt:'LB · Aim',rt:'RB · Fire',y:'D-pad right · Swap',view:'D-pad up · Scores'};
+ for(const [name,chip,label] of testButtons){
+   chip.hidden=Boolean(firefoxLayout&&['lb','rb','up','right'].includes(name));
+   chip.textContent=firefoxLayout?(firefoxLabels[name]??label):label;
+ }
  setupStatus.textContent=controller
-   ? saved?'Custom mapping saved on this browser. Press each control to test it below.':
+   ? firefoxLayout?'Firefox layout active. Firefox shares LB with Y, RB with View, and Menu with the right-stick click.':
+     saved?'Custom mapping saved on this browser. Press each control to test it below.':
      controller.ready?(controller.pad.axes.length===10?'Using the Xbox Bluetooth layout.':
        'Using the standard Xbox layout. Press each control to test it below.'):
      'This browser reports an unknown layout. Calibrate to enable it.'
@@ -1171,7 +1196,7 @@ if(!canReadGamepads)$('controllerStatus').textContent=controllerUnavailable;
 function pollController(){
  if(document.hidden||!canReadGamepads)return;
  const previous=controller;
- try{controller=sampleGamepad(navigator.getGamepads(),controllerProfiles);}
+ try{controller=sampleGamepad(navigator.getGamepads(),controllerProfiles,Boolean(prefs.firefoxStandardLayout));}
  catch{
   canReadGamepads=false;
   controller=null;
