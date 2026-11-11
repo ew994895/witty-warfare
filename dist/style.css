@@ -140,3 +140,6 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .stick-preview i{width:6px;height:6px;border-radius:50%;background:var(--yellow);transform:var(--stick-position)}
 .controller-signals output{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
 @media(max-width:620px){.settings-dialog #preferences{display:flex;flex-direction:column-reverse;gap:7px}.settings-dialog #preferences .controller-setup{margin-top:6px}}
+.controller-setup-actions input[type=number]{width:90px;background:#172a23;color:var(--paper);border:1px solid #78936b60;border-radius:3px;padding:5px}
+#controllerBindingStatus{flex-basis:100%}
+#controllerLastRaw{color:var(--yellow)}

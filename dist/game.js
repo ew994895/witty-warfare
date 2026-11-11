@@ -5,7 +5,7 @@ import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,TEAMS,TEAM_NAMES,TEAM_COLORS,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js?v=12';
 import {createPlayerHub} from './player-hub.js?v=12';
 import {createObjectiveDisplay} from './objectives-ui.js?v=12';
-import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=18';
+import {assignGamepadBinding,CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=20';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
 import {createRoomControls} from './room-controls.js?v=12';
 import {STEP,WEAPONS,PRIMARY_COUNT,PISTOL,KNIFE,meleeTrace,clamp,damp,createPlayer,stepMovement,moveBody,overlap,createArsenal,switchWeapon,startReload,tickArsenal,fireRound,trace,createNav} from './core.js';
@@ -1079,6 +1079,10 @@ const controllerSticks=$('controllerSticks');
 const controllerPreview=$('controllerPreview');
 const controllerBinding=$('controllerBinding');
 const rebindButton=$('rebindController');
+const controllerSource=$('controllerSource');
+const controllerRest=$('controllerRest');
+const controllerBindingStatus=$('controllerBindingStatus');
+let lastRawInput=null;
 for(const [name,label] of CALIBRATION_STEPS){
  controllerBinding.add(new Option(label,name));
 }
@@ -1100,11 +1104,20 @@ function showCalibration(hint=''){
  resetMappingButton.hidden=Boolean(calibration||!controllerProfiles[controller?.key]);
  controllerTest.hidden=controllerPreview.hidden=!controller?.ready;
  $('controllerSignals').hidden=!controller;
- $('controllerBindingLabel').hidden=rebindButton.hidden=Boolean(calibration||!controller?.ready);
+ $('controllerBindingLabel').hidden=rebindButton.hidden=Boolean(calibration||!controller);
+ const manualHidden=Boolean(calibration||!controller||!controllerBinding.value);
+ $('controllerSourceLabel').hidden=$('saveControllerBinding').hidden=manualHidden;
+ $('controllerRestLabel').hidden=manualHidden||!controllerSource.value.startsWith('axis:');
  rebindButton.disabled=!controllerBinding.value;
- skipViewButton.hidden=calibration?.session.step?.[0]!=='view';
+ skipViewButton.hidden=calibration?.session?.step?.[0]!=='view';
+ $('listenController').hidden=!calibration||Boolean(calibration.session);
  if(!calibration)return;
  const {session}=calibration;
+ if(!session){
+   step.textContent='Release all controls, then click Start listening.';
+   status.textContent='';
+   return;
+ }
  const [action,label]=session.step;
  const instruction=action.startsWith('move')||action.startsWith('look')?'Move the':'Press';
  const prompt=`${session.total>1?session.index+1+' / '+session.total+' · ':''}${instruction} ${label}`;
@@ -1119,16 +1132,67 @@ function cancelCalibration(){
 }
 function startCalibration(only=null){
  if(!controller)return;
- calibration={key:controller.key,index:controller.pad.index,
-  session:createGamepadCalibration(controller.pad,controller.profile,only,controllerPlatform)};
+ controllerBindingStatus.hidden=true;
+ calibration={key:controller.key,index:controller.pad.index,only,session:null};
  setupStatus.textContent='Press and release each control twice to confirm it. You can still adjust settings.';
  showCalibration();
 }
 calibrateButton.onclick=()=>startCalibration();
-controllerBinding.onchange=()=>{rebindButton.disabled=!controllerBinding.value;};
+$('listenController').onclick=()=>{
+ if(!controller||!calibration)return;
+ calibration.session=createGamepadCalibration(controller.pad,controller.profile,calibration.only,controllerPlatform);
+ calibration.started=performance.now();
+ showCalibration();
+};
+function refreshBindingEditor(){
+ controllerSource.replaceChildren(new Option('Unassigned','none'));
+ if(!controller)return;
+ const {raw,profile}=controller;
+ for(let index=0;index<raw.buttons.length;index++){
+   controllerSource.add(new Option('Button '+index,'button:'+index));
+ }
+ for(let index=0;index<raw.axes.length;index++){
+   controllerSource.add(new Option('Axis '+index+' toward +1','axis:'+index+':1'));
+   controllerSource.add(new Option('Axis '+index+' toward −1','axis:'+index+':-1'));
+ }
+ const binding=profile?.[controllerBinding.value];
+ if(binding?.type==='hat'){
+   controllerSource.add(new Option('Recorded D-pad position on Axis '+binding.index,'recorded'));
+   controllerSource.value='recorded';
+ }else if(binding){
+   controllerSource.value=binding.type+':'+binding.index+(binding.type==='axis'?':'+binding.direction:'');
+ }
+ controllerRest.value=String(binding?.rest??0);
+ showCalibration();
+}
+controllerBinding.onchange=()=>{controllerBindingStatus.hidden=true;refreshBindingEditor();};
+controllerSource.onchange=()=>{controllerBindingStatus.hidden=true;showCalibration();};
+$('saveControllerBinding').onclick=()=>{
+ if(!controller||!controllerBinding.value)return;
+ const [type,index,direction]=controllerSource.value.split(':');
+ if(type==='recorded')return;
+ if(!['none','button','axis'].includes(type))return;
+ const rest=Number(controllerRest.value);
+ if(type==='axis'&&(!controllerRest.checkValidity()||!Number.isFinite(rest)))return;
+ if(type==='axis'&&rest===Number(direction)){
+   controllerBindingStatus.textContent='The released value and pressed endpoint must be different.';
+   controllerBindingStatus.hidden=false;
+   return;
+ }
+ const binding=type==='none'?null:type==='button'?{type,index:Number(index)}:
+   {type,index:Number(index),direction:Number(direction),rest};
+ const {profile,conflicts}=assignGamepadBinding(controller.profile,controllerBinding.value,binding);
+ controllerProfiles[controller.key]=profile;
+ savePrefs();
+ sampleGamepad([]);
+ const label=CALIBRATION_STEPS.find(([name])=>name===controllerBinding.value)[1];
+ const affected=conflicts.map(name=>CALIBRATION_STEPS.find(([action])=>action===name)[1]);
+ controllerBindingStatus.textContent=label+' saved'+(affected.length?'. Also updated '+affected.join(', ')+'.':'.');
+ controllerBindingStatus.hidden=false;
+};
 rebindButton.onclick=()=>startCalibration(controllerBinding.value);
 skipViewButton.onclick=()=>{
- calibration?.session.skip();
+ calibration?.session?.skip();
  showCalibration();
 };
 cancelCalibrationButton.onclick=cancelCalibration;
@@ -1140,6 +1204,7 @@ resetMappingButton.onclick=()=>{
  sampleGamepad([]);
 };
 function updateControllerSetup(){
+ refreshBindingEditor();
  const saved=Boolean(controllerProfiles[controller?.key]);
  calibrateButton.disabled=!controller;
  setupStatus.textContent=controller
@@ -1159,11 +1224,21 @@ function testController(){
  $('rightStickPreview').style.setProperty('--stick-position',`translate(${axis(controller.lookX)*.13}px,${axis(controller.lookY)*.13}px)`);
 }
 function showRawController(){
- const {pad}=controller;
- const buttons=pad.buttons.flatMap((button,index)=>button.pressed||button.value>.05?[`B${index} ${button.value.toFixed(2)}`]:[]);
- const axes=pad.axes.map((value,index)=>`A${index} ${value.toFixed(2)}`);
- const text=[pad.id||'Controller',pad.mapping||'Raw layout',buttons.join(' · ')||'No buttons held',axes.join(' · ')].join('\n');
+ const {pad,raw}=controller;
+ const buttons=raw.buttons.map((value,index)=>`Button ${index} ${value.toFixed(2)}`);
+ const axes=raw.axes.map((value,index)=>`Axis ${index} ${value.toFixed(2)}`);
+ const text=[pad.id||'Controller',pad.mapping||'Raw layout',buttons.join(' · '),axes.join(' · ')].join('\n');
  if($('controllerRaw').textContent!==text)$('controllerRaw').textContent=text;
+ if(lastRawInput){
+   const changes=[
+     ...raw.buttons.flatMap((value,index)=>Math.abs(value-lastRawInput.buttons[index])>.15?['Button '+index+' '+value.toFixed(2)]:[]),
+     ...raw.axes.flatMap((value,index)=>Math.abs(value-lastRawInput.axes[index])>.3?['Axis '+index+' '+value.toFixed(2)]:[])
+   ];
+   if(changes.length){
+     $('controllerLastRaw').textContent='Last change · '+changes.join(' · ');
+     lastRawInput=raw;
+   }
+ }else lastRawInput=raw;
 }
 let canReadGamepads=typeof navigator.getGamepads==='function';
 const controllerUnavailable='Controller access is unavailable in this browser view. Try opening the game in its own tab.';
@@ -1187,6 +1262,11 @@ function pollController(){
  }
  if(!controller)return;
  if(controller.connected){
+  lastRawInput=null;
+  if(previous?.key!==controller.key){
+    controllerBindingStatus.hidden=true;
+    $('controllerLastRaw').textContent='';
+  }
   if(calibration&&(controller.key!==calibration.key||controller.pad.index!==calibration.index))cancelCalibration();
   $('controllerStatus').textContent=controller.ready?'Controller connected · D-pad browse · A select · Menu play':
     'Controller detected · open Settings → Controller setup to calibrate';
@@ -1199,7 +1279,13 @@ function pollController(){
  if(calibration){
   if(state==='playing'){cancelCalibration();return;}
   const {session}=calibration;
-  const hint=session.update(controller.pad);
+  if(!session)return;
+  const step=session.index;
+  let hint=session.update(controller.pad);
+  if(step!==session.index)calibration.started=performance.now();
+  if(!hint&&performance.now()-calibration.started>8000){
+   hint='Listening to all '+controller.raw.buttons.length+' buttons and '+controller.raw.axes.length+' axes. Waiting for a change.';
+  }
   if(session.profile){
    controllerProfiles[controller.key]=session.profile;
    savePrefs();

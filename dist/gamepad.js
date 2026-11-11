@@ -49,7 +49,15 @@ function stick(x = 0, y = 0, exponent = 1) {
 }
 
 function buttonValue(button) {
-  return button?.pressed ? 1 : button?.value || 0;
+  const value=typeof button==='number'?button:button?.pressed?1:button?.value;
+  return Number.isFinite(value)?Math.max(0,Math.min(1,value)):0;
+}
+
+export function readRawGamepad(pad) {
+  return {
+    buttons:Array.from(pad.buttons,buttonValue),
+    axes:Array.from(pad.axes,value=>Number.isFinite(value)?value:0)
+  };
 }
 
 function axisValue(pad, binding, bothDirections) {
@@ -84,6 +92,7 @@ export function createGamepadInput(platform) {
       return null;
     }
 
+    const raw=readRawGamepad(pad);
     const key = gamepadKey(pad);
     const fallback = defaultGamepadProfile(pad,platform);
     const profile = profiles[key] ?? fallback;
@@ -100,10 +109,10 @@ export function createGamepadInput(platform) {
       if (!ready) return false;
       let binding=profile[name];
       if(profile===XBOX_02FD_MAC&&(name==='lt'||name==='rt')){
-        if(pad.axes[binding.index]<-.6)bipolarTriggers.add(name);
+        if(raw.axes[binding.index]<-.6)bipolarTriggers.add(name);
         if(!bipolarTriggers.has(name))binding={...binding,rest:0};
       }
-      const value = mappedValue(pad,binding);
+      const value = mappedValue(raw,binding);
       // A small gap between press and release keeps lightly held triggers from stuttering.
       if (name === 'lt' || name === 'rt') return value >= (previous.has(name) ? .09 : .18);
       return value >= .5;
@@ -116,10 +125,10 @@ export function createGamepadInput(platform) {
     const pressed = name => held.has(name) && !last.has(name);
     previous = held;
 
-    const axes = STICK_NAMES.map(name => axisValue(pad,profile?.[name],true));
+    const axes = STICK_NAMES.map(name => axisValue(raw,profile?.[name],true));
     const [side,back] = stick(axes[0],axes[1]);
     const [lookX,lookY] = stick(axes[2],axes[3],1.7);
-    return {pad,key,profile,fallback,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
+    return {pad,raw,key,profile,fallback,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
       active:Boolean(held.size || side || back || lookX || lookY)};
   };
 }
@@ -131,12 +140,24 @@ function sameControl(a,b) {
   return true;
 }
 
+export function assignGamepadBinding(profile,action,binding) {
+  const next={...profile};
+  const conflicts=Object.keys(next).filter(name=>name!==action&&next[name]&&binding&&sameControl(binding,next[name]));
+  const old=next[action];
+  for(const name of conflicts){
+    const compatible=old?.type===binding.type&&STICK_NAMES.includes(name)===STICK_NAMES.includes(action);
+    next[name]=compatible?old:null;
+  }
+  next[action]=binding;
+  return {profile:next,conflicts};
+}
+
 export function createGamepadCalibration(pad, profile=null, only=null, platform) {
   const steps=only ? CALIBRATION_STEPS.filter(([name])=>name===only) : CALIBRATION_STEPS;
-  const bindings=only ? {...profile} : {};
+  let bindings=only ? {...profile} : {};
   const fallback=defaultGamepadProfile(pad,platform);
   const reserved=fallback===XBOX_02FD_MAC?[12,15]:fallback===STANDARD_PROFILE?[16]:[];
-  let baseline;
+  let baseline=readRawGamepad(pad);
   let step=0;
   let candidate=null;
   let confirm=false;
@@ -144,11 +165,8 @@ export function createGamepadCalibration(pad, profile=null, only=null, platform)
 
   function advance(binding) {
     const name=steps[step][0];
-    if(only&&binding){
-      const conflict=Object.keys(bindings).find(action=>action!==name&&bindings[action]&&sameControl(binding,bindings[action]));
-      if(conflict)bindings[conflict]=bindings[name]?.type===binding.type?bindings[name]:null;
-    }
-    bindings[name]=binding;
+    if(only)bindings=assignGamepadBinding(bindings,name,binding).profile;
+    else bindings[name]=binding;
     step++;
     candidate=null;
     confirm=released=false;
@@ -158,12 +176,10 @@ export function createGamepadCalibration(pad, profile=null, only=null, platform)
   function capture(name,axes,buttons) {
     const isStick=STICK_NAMES.includes(name);
     const isHat=['up','down','left','right'].includes(name);
-    const isTrigger=name==='lt'||name==='rt';
     if(!isStick){
       const index=buttons.findIndex((value,index)=>value>=.5&&baseline.buttons[index]<.15&&!reserved.includes(index));
       if(index>=0)return buttonBinding(index);
     }
-    if(!isStick&&!isHat&&!isTrigger)return null;
     const deltas=axes.map((value,index)=>value-baseline.axes[index]);
     const index=deltas.reduce((best,delta,index)=>Math.abs(delta)>Math.abs(deltas[best]||0)?index:best,-1);
     const delta=deltas[index]||0;
@@ -182,8 +198,7 @@ export function createGamepadCalibration(pad, profile=null, only=null, platform)
     update(pad) {
       const name=steps[step]?.[0];
       if(!name)return '';
-      const axes=Array.from(pad.axes);
-      const buttons=Array.from(pad.buttons,buttonValue);
+      const {axes,buttons}=readRawGamepad(pad);
       if(!baseline){
         // Record the next prompt's neutral state after the last captured input is released.
         baseline={axes,buttons};

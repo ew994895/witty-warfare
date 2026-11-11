@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput,gamepadKey} from '../dist/gamepad.js';
+import {assignGamepadBinding,readRawGamepad,CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput,gamepadKey} from '../dist/gamepad.js';
 
 function gamepad(index=0){
   return {index,connected:true,mapping:'standard',axes:[0,0,0,0],
@@ -227,4 +227,68 @@ test('trigger calibration handles an axis that reports its true neutral only aft
     wizard.update(pad);
   }
   assert.deepEqual(wizard.profile.lt,{type:'axis',index:4,rest:-1,direction:1});
+});
+
+
+test('raw snapshots retain every reported channel and accept object or numeric buttons',()=>{
+  const pad=gamepad();
+  pad.buttons=[0,1,.4,{pressed:false,value:.3},{pressed:true,value:0},null,NaN];
+  pad.axes=[0,-1,1,.25,NaN,3.285];
+  const raw=readRawGamepad(pad);
+  assert.deepEqual(raw.buttons,[0,1,.4,.3,1,0,0]);
+  assert.deepEqual(raw.axes,[0,-1,1,.25,0,3.285]);
+  pad.axes[3]=.8;
+  assert.equal(raw.axes[3],.25);
+});
+
+test('saved manual bindings use separate trigger axes with either polarity and preserve fresh-fire edges',()=>{
+  for(const [rest,end] of [[-1,1],[0,1],[1,-1],[0,-1]]){
+    const pad=gamepad(2);
+    pad.mapping='';
+    pad.axes=Array(8).fill(0);
+    pad.axes[5]=pad.axes[7]=rest;
+    const sample=createGamepadInput();
+    let profile=assignGamepadBinding({},'lt',{type:'axis',index:5,rest,direction:Math.sign(end-rest)}).profile;
+    profile=assignGamepadBinding(profile,'rt',{type:'axis',index:7,rest,direction:Math.sign(end-rest)}).profile;
+    const profiles={[gamepadKey(pad)]:JSON.parse(JSON.stringify(profile))};
+    sample([null,null,pad],profiles);
+    pad.axes[5]=end;
+    pad.axes[7]=end;
+    let input=sample([null,null,pad],profiles);
+    assert.deepEqual([...input.held],['lt','rt']);
+    assert.equal(input.pressed('rt'),true);
+    assert.equal(input.lookX,0);
+    assert.equal(input.lookY,0);
+    assert.equal(sample([pad],profiles).pressed('rt'),false);
+    pad.axes[7]=rest;
+    assert.equal(sample([pad],profiles).held.has('rt'),false);
+    pad.axes[7]=end;
+    assert.equal(sample([pad],profiles).pressed('rt'),true);
+  }
+});
+
+test('automatic detection can assign a non-trigger action to any reported axis',()=>{
+  const pad=gamepad();
+  pad.axes.push(0,0,0);
+  const wizard=createGamepadCalibration(pad,{},'x');
+  for(let press=0;press<2;press++){
+    pad.axes[6]=-1;
+    wizard.update(pad);
+    pad.axes[6]=0;
+    wizard.update(pad);
+  }
+  assert.deepEqual(wizard.profile.x,{type:'axis',index:6,rest:0,direction:-1});
+});
+
+test('binding a trigger to an axis already used by look clears that conflict and reports it',()=>{
+  const profile={
+    lt:{type:'button',index:6},
+    lookX:{type:'axis',index:2,rest:0,direction:1},
+    lookY:{type:'axis',index:3,rest:0,direction:1}
+  };
+  const result=assignGamepadBinding(profile,'lt',{type:'axis',index:2,rest:-1,direction:1});
+  assert.deepEqual(result.conflicts,['lookX']);
+  assert.equal(result.profile.lookX,null);
+  assert.deepEqual(result.profile.lookY,profile.lookY);
+  assert.equal(profile.lookX.index,2);
 });
