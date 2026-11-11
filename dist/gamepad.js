@@ -11,6 +11,32 @@ export const CALIBRATION_STEPS = [
   ['lookX','right stick fully right'],['lookY','right stick fully down']
 ];
 
+const buttonBinding=index=>({type:'button',index});
+const axisBinding=(index,rest=0,direction=1)=>({type:'axis',index,rest,direction});
+const STANDARD_PROFILE=Object.fromEntries([
+  ...Object.entries(BUTTONS).map(([name,index])=>[name,buttonBinding(index)]),
+  ...STICK_NAMES.map((name,index)=>[name,axisBinding(index)])
+]);
+
+// Raw macOS HID order for Xbox Wireless Controller 045e:02fd.
+// Chromium applies this same layout when the OS exposes the raw report.
+const XBOX_02FD_MAC={
+  a:buttonBinding(0),b:buttonBinding(1),x:buttonBinding(3),y:buttonBinding(4),
+  lb:buttonBinding(6),rb:buttonBinding(7),view:buttonBinding(16),menu:buttonBinding(11),
+  lt:axisBinding(3,-1),rt:axisBinding(4,-1),
+  moveX:axisBinding(0),moveY:axisBinding(1),lookX:axisBinding(2),lookY:axisBinding(5),
+  up:{type:'hat',index:9,target:-1},right:{type:'hat',index:9,target:-3/7},
+  down:{type:'hat',index:9,target:1/7},left:{type:'hat',index:9,target:5/7}
+};
+
+export function defaultGamepadProfile(pad,platform='') {
+  if (/^Mac/i.test(platform) && /0?45e.*0?2fd/i.test(pad.id) && pad.axes.length===10 && pad.buttons.length>=17) {
+    return XBOX_02FD_MAC;
+  }
+  if (pad.mapping==='standard' && pad.axes.length===4 && pad.buttons.length>=16) return STANDARD_PROFILE;
+  return null;
+}
+
 export function gamepadKey(pad) {
   return JSON.stringify([pad.id,pad.mapping,pad.buttons.length,pad.axes.length]);
 }
@@ -41,16 +67,17 @@ function mappedValue(pad, binding) {
   return axisValue(pad,binding,false);
 }
 
-export function createGamepadInput() {
+export function createGamepadInput(platform) {
   let device = null;
   let mapping;
   let previous = new Set();
   let blocked = new Set();
+  const bipolarTriggers=new Set();
 
   return function sample(pads, profiles = {}) {
     const available = Array.from(pads).filter(pad => pad?.connected);
     const pad = available.find(pad => pad.index === device?.index)
-      ?? available.find(pad => profiles[gamepadKey(pad)] || pad.mapping === 'standard')
+      ?? available.find(pad => profiles[gamepadKey(pad)] || defaultGamepadProfile(pad,platform))
       ?? available[0];
     if (!pad) {
       device = null;
@@ -58,18 +85,25 @@ export function createGamepadInput() {
     }
 
     const key = gamepadKey(pad);
-    const profile = profiles[key];
-    const ready = Boolean(profile || pad.mapping === 'standard');
+    const fallback = defaultGamepadProfile(pad,platform);
+    const profile = profiles[key] ?? fallback;
+    const ready = Boolean(profile);
     const connected = device?.index !== pad.index || device?.key !== key || mapping !== profile;
     if (connected) {
       device = {index:pad.index,key};
       mapping = profile;
       previous = new Set();
+      bipolarTriggers.clear();
     }
 
     const held = new Set(Object.keys(BUTTONS).filter(name => {
       if (!ready) return false;
-      const value = profile ? mappedValue(pad,profile[name]) : buttonValue(pad.buttons[BUTTONS[name]]);
+      let binding=profile[name];
+      if(profile===XBOX_02FD_MAC&&(name==='lt'||name==='rt')){
+        if(pad.axes[binding.index]<-.6)bipolarTriggers.add(name);
+        if(!bipolarTriggers.has(name))binding={...binding,rest:0};
+      }
+      const value = mappedValue(pad,binding);
       // A small gap between press and release keeps lightly held triggers from stuttering.
       if (name === 'lt' || name === 'rt') return value >= (previous.has(name) ? .09 : .18);
       return value >= .5;
@@ -82,11 +116,10 @@ export function createGamepadInput() {
     const pressed = name => held.has(name) && !last.has(name);
     previous = held;
 
-    const axes = ready ? STICK_NAMES.map((name,index) => profile
-      ? axisValue(pad,profile[name],true) : pad.axes[index]) : [];
+    const axes = STICK_NAMES.map(name => axisValue(pad,profile?.[name],true));
     const [side,back] = stick(axes[0],axes[1]);
     const [lookX,lookY] = stick(axes[2],axes[3],1.7);
-    return {pad,key,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
+    return {pad,key,profile,fallback,ready,side,forward:-back || 0,lookX,lookY,held,pressed,connected,
       active:Boolean(held.size || side || back || lookX || lookY)};
   };
 }
@@ -98,59 +131,99 @@ function sameControl(a,b) {
   return true;
 }
 
-export function createGamepadCalibration(pad) {
-  const rest = Array.from(pad.axes);
-  const bindings = {};
-  let step = 0;
-  let waitingForRelease = true;
+export function createGamepadCalibration(pad, profile=null, only=null, platform) {
+  const steps=only ? CALIBRATION_STEPS.filter(([name])=>name===only) : CALIBRATION_STEPS;
+  const bindings=only ? {...profile} : {};
+  const fallback=defaultGamepadProfile(pad,platform);
+  const reserved=fallback===XBOX_02FD_MAC?[12,15]:fallback===STANDARD_PROFILE?[16]:[];
+  let baseline;
+  let step=0;
+  let candidate=null;
+  let confirm=false;
+  let released=false;
 
   function advance(binding) {
-    bindings[CALIBRATION_STEPS[step][0]] = binding;
+    const name=steps[step][0];
+    if(only&&binding){
+      const conflict=Object.keys(bindings).find(action=>action!==name&&bindings[action]&&sameControl(binding,bindings[action]));
+      if(conflict)bindings[conflict]=bindings[name]?.type===binding.type?bindings[name]:null;
+    }
+    bindings[name]=binding;
     step++;
-    waitingForRelease = true;
+    candidate=null;
+    confirm=released=false;
+    baseline=null;
+  }
+
+  function capture(name,axes,buttons) {
+    const isStick=STICK_NAMES.includes(name);
+    const isHat=['up','down','left','right'].includes(name);
+    const isTrigger=name==='lt'||name==='rt';
+    if(!isStick){
+      const index=buttons.findIndex((value,index)=>value>=.5&&baseline.buttons[index]<.15&&!reserved.includes(index));
+      if(index>=0)return buttonBinding(index);
+    }
+    if(!isStick&&!isHat&&!isTrigger)return null;
+    const deltas=axes.map((value,index)=>value-baseline.axes[index]);
+    const index=deltas.reduce((best,delta,index)=>Math.abs(delta)>Math.abs(deltas[best]||0)?index:best,-1);
+    const delta=deltas[index]||0;
+    if(Math.abs(delta)<(isStick?.6:.35))return null;
+    return isHat ? {type:'hat',index,target:axes[index]} : axisBinding(index,baseline.axes[index],Math.sign(delta));
   }
 
   return {
-    get step() { return CALIBRATION_STEPS[step]; },
+    get step() { return steps[step]; },
     get index() { return step; },
-    get profile() { return step === CALIBRATION_STEPS.length ? bindings : null; },
+    get total() { return steps.length; },
+    get profile() { return step===steps.length ? bindings : null; },
     skip() {
-      if (CALIBRATION_STEPS[step]?.[0] === 'view') advance(null);
+      if(steps[step]?.[0]==='view')advance(null);
     },
     update(pad) {
-      const name = CALIBRATION_STEPS[step]?.[0];
-      if (!name) return '';
-      const buttons = Array.from(pad.buttons,buttonValue);
-      const deltas = rest.map((value,index) => pad.axes[index] - value);
-      if (waitingForRelease) {
-        if (buttons.every(value => value < .15) && deltas.every(delta => Math.abs(delta) < .18)) {
-          waitingForRelease = false;
-        } else {
-          return 'Release the control before continuing.';
+      const name=steps[step]?.[0];
+      if(!name)return '';
+      const axes=Array.from(pad.axes);
+      const buttons=Array.from(pad.buttons,buttonValue);
+      if(!baseline){
+        // Record the next prompt's neutral state after the last captured input is released.
+        baseline={axes,buttons};
+        return 'Release the controls, then follow the prompt.';
+      }
+      if(candidate&&!released){
+        const current=candidate.type==='button' ? buttons[candidate.index] :
+          Math.abs(axes[candidate.index]-baseline.axes[candidate.index]);
+        if(candidate.type==='axis'&&(name==='lt'||name==='rt')){
+          const value=axes[candidate.index];
+          if((value-candidate.rest)*candidate.direction<-.25){
+            candidate.rest=value;
+            baseline.axes[candidate.index]=value;
+          }else if(current>=.15)return 'Release the control.';
+        }else if(current>=.15)return 'Release the control.';
+        if(confirm){
+          advance(candidate);
+          return '';
         }
+        released=true;
+        return 'Press or move the same control again to confirm.';
       }
-      const isStick = STICK_NAMES.includes(name);
-      const isHat = ['up','down','left','right'].includes(name);
-      let binding;
-      if (!isStick) {
-        const index = buttons.findIndex((value,index) => value >= .5 && !(pad.mapping === 'standard' && index === 16));
-        if (index >= 0) binding = {type:'button',index};
+      for(const [index,value] of buttons.entries()){
+        if(value<.15)baseline.buttons[index]=value;
       }
-      if (!binding && !buttons.some(value => value >= .5)) {
-        const index = deltas.reduce((best,delta,index) =>
-          Math.abs(delta) > Math.abs(deltas[best] || 0) ? index : best,-1);
-        const delta = deltas[index] || 0;
-        if (Math.abs(delta) >= (isStick ? .6 : .35)) {
-          binding = isHat ? {type:'hat',index,target:pad.axes[index]} :
-            {type:'axis',index,rest:rest[index],direction:Math.sign(delta)};
+      const binding=capture(name,axes,buttons);
+      if(!binding)return released?'Press or move the same control again to confirm.':'';
+      if(candidate){
+        if(!sameControl(candidate,binding)||(candidate.type==='axis'&&candidate.direction!==binding.direction)){
+          return 'Use the same physical control again to confirm.';
         }
+        confirm=true;
+        released=false;
+        return 'Release to save this control.';
       }
-      if (!binding) return '';
-      if (Object.values(bindings).some(other => other && sameControl(binding,other))) {
-        return 'That input is already assigned. Release it and try the control shown.';
+      if(!only&&Object.entries(bindings).some(([action,other])=>action!==name&&other&&sameControl(binding,other))){
+        return 'That signal is already assigned. Try the physical control shown.';
       }
-      advance(binding);
-      return 'Release the control before continuing.';
+      candidate=binding;
+      return 'Release the control.';
     }
   };
 }

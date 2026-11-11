@@ -130,3 +130,13 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .controller-setup-actions .secondary{width:auto;margin:0;padding:7px 9px;font-size:9px}
 .controller-test span{border:1px solid #78936b60;border-radius:3px;padding:3px 5px;color:#b6c8af;font-size:9px}
 .controller-test span.active{background:var(--yellow);border-color:var(--yellow);color:var(--ink)}
+.settings-dialog{width:min(720px,calc(100vw - 24px))}
+.settings-dialog #preferences{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+.preference-controller .controller-controls{margin-top:8px}
+.controller-setup-actions label{flex-basis:100%;display:grid;gap:4px;color:#b6c8af;font-size:10px}
+.controller-setup-actions select{max-width:100%;background:#172a23;color:var(--paper);padding:5px;border:1px solid #78936b60}
+.controller-preview{display:flex;align-items:center;gap:8px;margin:7px 0}
+.stick-preview{width:32px;height:32px;border:1px solid #78936b80;border-radius:50%;display:grid;place-items:center;flex:none}
+.stick-preview i{width:6px;height:6px;border-radius:50%;background:var(--yellow);transform:var(--stick-position)}
+.controller-signals output{display:block;white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0}
+@media(max-width:620px){.settings-dialog #preferences{display:flex;flex-direction:column-reverse;gap:7px}.settings-dialog #preferences .controller-setup{margin-top:6px}}
