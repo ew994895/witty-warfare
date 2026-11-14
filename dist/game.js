@@ -4,15 +4,15 @@ import {MAPS,getMap,createMap} from './maps.js';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,TEAMS,TEAM_NAMES,TEAM_COLORS,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,teamWinner} from './rules.js?v=12';
 import {createPlayerHub} from './player-hub.js?v=12';
-import {createObjectiveDisplay} from './objectives-ui.js?v=12';
-import {assignGamepadBinding,CALIBRATION_STEPS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=20';
+import {createObjectiveDisplay} from './objectives-ui.js?v=21';
+import {assignGamepadBinding,CALIBRATION_STEPS,CONTROLLER_ACTIONS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=21';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
 import {createRoomControls} from './room-controls.js?v=12';
 import {STEP,WEAPONS,PRIMARY_COUNT,PISTOL,KNIFE,meleeTrace,clamp,damp,createPlayer,stepMovement,moveBody,overlap,createArsenal,switchWeapon,startReload,tickArsenal,fireRound,trace,createNav} from './core.js';
 const $=id=>document.getElementById(id), canvas=$('game');
 let renderer;
 try {renderer=new THREE.WebGLRenderer({canvas,antialias:true,powerPreference:'high-performance'});}catch(e){$('error').hidden=false;$('error').textContent='This game needs WebGL. Please open it in a browser with WebGL enabled.';throw e;}
-renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.autoClear=false;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.setSize(innerWidth,innerHeight);renderer.setClearColor(0x8faeb3);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.autoClear=false;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.setSize(innerWidth,innerHeight,false);renderer.setClearColor(0x8faeb3);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;
 const scene=new THREE.Scene();scene.fog=new THREE.Fog(0xa6bbba,32,90);const camera=new THREE.PerspectiveCamera(90,innerWidth/innerHeight,.06,120);camera.rotation.order='YXZ';scene.add(camera);
 scene.add(new THREE.HemisphereLight(0xe5f5f7,0x526856,2.6));const sun=new THREE.DirectionalLight(0xffe1b5,3.5);sun.position.set(-20,35,15);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);Object.assign(sun.shadow.camera,{left:-38,right:38,top:38,bottom:-38,near:1,far:90});sun.shadow.bias=-.0007;scene.add(sun);
 let activeMap=createMap('dust-court'),solids=activeMap.solids,spawns=activeMap.spawns,nav=createNav(solids,activeMap.navBounds);
@@ -433,7 +433,7 @@ function render(dt,time){
    bot.legs[0].rotation.x=walk;
    bot.legs[1].rotation.x=-walk;
  }
- for(const n of numbers){const v=n.pos.clone().project(camera);n.el.style.display=v.z>1?'none':'';n.el.style.left=(v.x*.5+.5)*innerWidth+'px';n.el.style.top=(-v.y*.5+.5)*innerHeight+'px';n.el.style.opacity=Math.min(1,n.time*4);}
+ for(const n of numbers){const v=n.pos.clone().project(camera);n.el.style.display=v.z>1?'none':'';n.el.style.left=(v.x*.5+.5)*100+'%';n.el.style.top=(-v.y*.5+.5)*100+'%';n.el.style.opacity=Math.min(1,n.time*4);}
  renderNames();renderer.clear();renderer.render(scene,camera);if((state==='playing'||state==='paused')&&player.dead===0&&!(arsenal.index===1&&ads>.92)){renderer.clearDepth();renderer.render(viewScene,viewCamera);}
 }
 function selectMap(id,persist=true){
@@ -515,7 +515,16 @@ document.addEventListener('mousemove',e=>{if(state!=='playing'||player.dead>0)re
 document.addEventListener('pointerlockchange',()=>{const locked=document.pointerLockElement===canvas;if(locked){hadLock=true;lookMode='locked';$('mouseNotice').hidden=true;}else{const wasLocked=hadLock;hadLock=false;if(wasLocked&&state==='playing')pause();}});
 $('captureMouse').onclick=()=>{captureOnClick=false;canvas.focus();requestLock();};
 document.addEventListener('pointerlockerror',fallbackMouse);window.addEventListener('blur',()=>{if(state==='playing')pause();resetTransient()});document.addEventListener('visibilitychange',()=>{if(document.hidden){lobbyAudio.mute();pause();}});
-window.addEventListener('resize',()=>{camera.aspect=viewCamera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();viewCamera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+function resizeArena(){
+ const width=Math.max(1,canvas.clientWidth);
+ const height=Math.max(1,canvas.clientHeight);
+ camera.aspect=viewCamera.aspect=width/height;
+ camera.updateProjectionMatrix();
+ viewCamera.updateProjectionMatrix();
+ renderer.setSize(width,height,false);
+}
+new ResizeObserver(resizeArena).observe(canvas);
+resizeArena();
 
 function ruleLabel(value){return GAME_RULES[value]||GAME_RULES.ffa;}
 function rankedActors(){
@@ -587,7 +596,7 @@ function renderResults(){
  renderTeamTally('resultTeams');
  renderStandings('matchStandings');
 }
-function renderNames(){const forward=direction(player.yaw,player.pitch);for(const b of [...bots,...remoteActors.values()]){b.label.hidden=true;if(state!=='playing'||b.dead>0||!b.group.visible)continue;const dist=Math.hypot(b.x-player.x,b.z-player.z);if(dist>30||dist<.5||!visible(player,b))continue;const toward=new THREE.Vector3(b.x-player.x,b.feet+b.eye-player.feet-player.eye,b.z-player.z).normalize();if(forward.dot(toward)<(player.team&&player.team===b.team ? .7:.96))continue;const v=new THREE.Vector3(b.group.position.x,b.group.position.y+2-b.crouch*.3,b.group.position.z).project(camera);if(v.z>1||Math.abs(v.x)>1||Math.abs(v.y)>1)continue;b.label.hidden=false;b.label.textContent=b.name;b.label.style.left=(v.x*.5+.5)*innerWidth+'px';b.label.style.top=(-v.y*.5+.5)*innerHeight+'px';b.label.style.opacity=String(.65*(1-dist/40));}}
+function renderNames(){const forward=direction(player.yaw,player.pitch);for(const b of [...bots,...remoteActors.values()]){b.label.hidden=true;if(state!=='playing'||b.dead>0||!b.group.visible)continue;const dist=Math.hypot(b.x-player.x,b.z-player.z);if(dist>30||dist<.5||!visible(player,b))continue;const toward=new THREE.Vector3(b.x-player.x,b.feet+b.eye-player.feet-player.eye,b.z-player.z).normalize();if(forward.dot(toward)<(player.team&&player.team===b.team ? .7:.96))continue;const v=new THREE.Vector3(b.group.position.x,b.group.position.y+2-b.crouch*.3,b.group.position.z).project(camera);if(v.z>1||Math.abs(v.x)>1||Math.abs(v.y)>1)continue;b.label.hidden=false;b.label.textContent=b.name;b.label.style.left=(v.x*.5+.5)*100+'%';b.label.style.top=(-v.y*.5+.5)*100+'%';b.label.style.opacity=String(.65*(1-dist/40));}}
 function onlineShot(){const w=WEAPONS[arsenal.index];player.shield=0;gunKick=1;flashTime=.04;bloom=Math.min(1,bloom+.2);kick=Math.min(.1,kick+w.kick*(ads>.5?.65:1));if(w.mode==='melee')tone(280,.15,.1,'triangle');else shotAudio(arsenal.index);}
 function leaveOnline(){
  online?.net?.close();
@@ -1035,7 +1044,7 @@ function controllerMenu(){
  const direction=(controller.pressed('down')||controller.pressed('right')?1:0)-(controller.pressed('up')||controller.pressed('left')?1:0);
 
  if(controller.pressed('b')){
-  if(modal===lobbySettings&&controllerSetup.open)return;
+  if(calibration?.pending){cancelCalibration();return;}
   if(modalClose)modalClose.click();
   else if(state==='paused')resume();
   else if(state==='staging'||(state==='lobby'&&!$('cancelRanked').hidden))$('cancelRanked').click();
@@ -1067,7 +1076,6 @@ function controllerMenu(){
   return;
  }
  if(controller.pressed('a')){
-  if(modal===lobbySettings&&controllerSetup.open&&!['fullscreen','controllerTestToggle'].includes(focused.id))return;
   const target=current>=0?focused:primary;
   if(target?.matches('button,summary,input[type="checkbox"]'))target.click();
  }
@@ -1075,6 +1083,19 @@ function controllerMenu(){
 const controllerSetup=$('controllerSetup');
 const setupStatus=$('controllerSetupStatus');
 const controllerTest=$('controllerTest');
+const controllerActionList=$('controllerActionList');
+const confirmBindingButton=$('confirmControllerBinding');
+const actionRows=Object.entries(CONTROLLER_ACTIONS).map(([action,label])=>{
+ const row=document.createElement('li');
+ const name=document.createElement('span');
+ name.textContent=label;
+ const button=document.createElement('button');
+ button.type='button';
+ button.onclick=()=>startCalibration(action,button);
+ row.append(name,button);
+ controllerActionList.append(row);
+ return {action,label,button};
+});
 const controllerSticks=$('controllerSticks');
 const controllerPreview=$('controllerPreview');
 const controllerBinding=$('controllerBinding');
@@ -1097,11 +1118,31 @@ const testButtons=CALIBRATION_STEPS.slice(0,14).map(([name,label])=>{
  return [name,chip];
 });
 let calibration=null;
+function bindingLabel(binding,action){
+ if(!binding)return 'Unassigned';
+ if(binding.type==='hat')return 'D-pad';
+ if(binding.type==='axis')return 'Axis '+binding.index;
+ const known=controller.fallback&&Object.entries(controller.fallback).find(([,input])=>
+   input?.type==='button'&&input.index===binding.index);
+ if(!known)return 'Button '+binding.index;
+ return CALIBRATION_STEPS.find(([name])=>name===known[0])?.[1].split(' (')[0]??action.toUpperCase();
+}
+function updateActionRows(){
+ for(const {action,label,button} of actionRows){
+   const value=bindingLabel(controller?.profile?.[action],action);
+   button.textContent=value+' · Change';
+   button.setAttribute('aria-label','Change '+label+' ('+value+')');
+ }
+}
+
 function showCalibration(hint=''){
  const step=$('controllerStep'),status=$('controllerStepHint');
  step.hidden=status.hidden=cancelCalibrationButton.hidden=!calibration;
  calibrateButton.hidden=Boolean(calibration);
  resetMappingButton.hidden=Boolean(calibration||!controllerProfiles[controller?.key]);
+ controllerActionList.hidden=!controller?.ready||Boolean(calibration);
+ $('controllerAdvanced').hidden=!controller||Boolean(calibration);
+ confirmBindingButton.hidden=!calibration?.pending;
  controllerTest.hidden=controllerPreview.hidden=!controller?.ready;
  $('controllerSignals').hidden=!controller;
  $('controllerBindingLabel').hidden=rebindButton.hidden=Boolean(calibration||!controller);
@@ -1110,9 +1151,20 @@ function showCalibration(hint=''){
  $('controllerRestLabel').hidden=manualHidden||!controllerSource.value.startsWith('axis:');
  rebindButton.disabled=!controllerBinding.value;
  skipViewButton.hidden=calibration?.session?.step?.[0]!=='view';
- $('listenController').hidden=!calibration||Boolean(calibration.session);
+ $('listenController').hidden=!calibration||Boolean(calibration.session)||Boolean(calibration.button);
  if(!calibration)return;
  const {session}=calibration;
+ if(calibration.pending){
+   const {label,affected,binding}=calibration.pending;
+   step.textContent=label+' → '+binding;
+   status.textContent=affected.length?affected.join(' · '):'Save to use this input.';
+   return;
+ }
+ if(calibration.button){
+   step.textContent='Press the button you want for '+CONTROLLER_ACTIONS[calibration.only]+'.';
+   status.textContent=hint;
+   return;
+ }
  if(!session){
    step.textContent='Release all controls, then click Start listening.';
    status.textContent='';
@@ -1126,23 +1178,41 @@ function showCalibration(hint=''){
 }
 function cancelCalibration(){
  if(!calibration)return;
+ const returnFocus=calibration.button&&document.activeElement.closest('.controller-setup');
+ const changeButton=calibration.button;
  calibration=null;
  sampleGamepad([]);
  updateControllerSetup();
+ if(returnFocus)changeButton.focus();
 }
-function startCalibration(only=null){
+function startCalibration(only=null,button=null){
  if(!controller)return;
  controllerBindingStatus.hidden=true;
- calibration={key:controller.key,index:controller.pad.index,only,session:null};
- setupStatus.textContent='Press and release each control twice to confirm it. You can still adjust settings.';
- showCalibration();
+ calibration={key:controller.key,index:controller.pad.index,only,button,session:null};
+ if(button){
+   beginListening(false);
+   cancelCalibrationButton.focus();
+ }else{
+   setupStatus.textContent='Press and release each control twice to confirm it. You can still adjust settings.';
+   showCalibration();
+ }
 }
 calibrateButton.onclick=()=>startCalibration();
-$('listenController').onclick=()=>{
+function beginListening(confirmTwice){
  if(!controller||!calibration)return;
- calibration.session=createGamepadCalibration(controller.pad,controller.profile,calibration.only,controllerPlatform);
+ calibration.session=createGamepadCalibration(controller.pad,controller.profile,calibration.only,controllerPlatform,confirmTwice);
  calibration.started=performance.now();
  showCalibration();
+}
+$('listenController').onclick=()=>beginListening(true);
+confirmBindingButton.onclick=()=>{
+ if(!calibration?.pending||!controller)return;
+ const {profile,label}=calibration.pending;
+ controllerProfiles[controller.key]=profile;
+ savePrefs();
+ cancelCalibration();
+ controllerBindingStatus.textContent=label+' saved.';
+ controllerBindingStatus.hidden=false;
 };
 function refreshBindingEditor(){
  controllerSource.replaceChildren(new Option('Unassigned','none'));
@@ -1202,15 +1272,18 @@ resetMappingButton.onclick=()=>{
  delete controllerProfiles[controller.key];
  savePrefs();
  sampleGamepad([]);
+ controllerBindingStatus.textContent='Default controls restored.';
+ controllerBindingStatus.hidden=false;
 };
 function updateControllerSetup(){
  refreshBindingEditor();
+ updateActionRows();
  const saved=Boolean(controllerProfiles[controller?.key]);
  calibrateButton.disabled=!controller;
  setupStatus.textContent=controller
-   ? saved?'Custom mapping saved on this browser. Press each control to test it below.':
+   ? saved?'Custom controls saved in this browser.':
      controller.ready?(controller.pad.axes.length===10?'Using the Xbox Bluetooth layout.':
-       'Using the standard Xbox layout. Press each control to test it below.'):
+       'Standard Xbox controls. Choose an action to change its input.'):
      'This browser reports an unknown layout. Calibrate to enable it.'
    : 'Press a button on your paired controller.';
  showCalibration();
@@ -1269,28 +1342,40 @@ function pollController(){
   }
   if(calibration&&(controller.key!==calibration.key||controller.pad.index!==calibration.index))cancelCalibration();
   $('controllerStatus').textContent=controller.ready?'Controller connected · D-pad browse · A select · Menu play':
-    'Controller detected · open Settings → Controller setup to calibrate';
+    'Controller detected · open Settings → Controller controls to calibrate';
   setControllerActive(controller.ready);
   updateControllerSetup();
  }
  const testing=controllerSetup.open&&(lobbySettings.open||state==='paused');
  if(testing&&controller.ready)testController();
  if(testing&&$('controllerSignals').open)showRawController();
- if(calibration){
-  if(state==='playing'){cancelCalibration();return;}
+ if(calibration&&state==='playing'){cancelCalibration();return;}
+ if(calibration&&!calibration.pending){
   const {session}=calibration;
   if(!session)return;
   const step=session.index;
   let hint=session.update(controller.pad);
   if(step!==session.index)calibration.started=performance.now();
   if(!hint&&performance.now()-calibration.started>8000){
-   hint='Listening to all '+controller.raw.buttons.length+' buttons and '+controller.raw.axes.length+' axes. Waiting for a change.';
+   hint=calibration.button?'Waiting for an input from your browser. Try a different button if this one gives no response.':
+     'Waiting for a button or stick to move.';
   }
   if(session.profile){
-   controllerProfiles[controller.key]=session.profile;
-   savePrefs();
-   cancelCalibration();
-   updateControllerSetup();
+   if(calibration.button){
+    const {profile,conflicts}=assignGamepadBinding(controller.profile,calibration.only,session.captured);
+    calibration.pending={profile,label:CONTROLLER_ACTIONS[calibration.only],
+      affected:conflicts.map(action=>{
+        const label=CONTROLLER_ACTIONS[action]??CALIBRATION_STEPS.find(([name])=>name===action)[1];
+        return label+' will use '+bindingLabel(profile[action],action)+'.';
+      }),
+      binding:bindingLabel(session.captured,calibration.only)};
+    showCalibration();
+    confirmBindingButton.focus();
+   }else{
+    controllerProfiles[controller.key]=session.profile;
+    savePrefs();
+    cancelCalibration();
+   }
   }else showCalibration(hint);
   return;
  }

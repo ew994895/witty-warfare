@@ -2,6 +2,12 @@ const BUTTONS = {a:0,b:1,x:2,y:3,lb:4,rb:5,lt:6,rt:7,view:8,menu:9,up:12,down:13
 const DEADZONE = .15;
 const STICK_NAMES = ['moveX','moveY','lookX','lookY'];
 
+export const CONTROLLER_ACTIONS = {
+  lt:'Aim',rt:'Fire',a:'Jump',b:'Slide / crouch',x:'Reload',y:'Swap weapon',
+  rb:'Jump (alternate)',lb:'Slide / crouch (alternate)',view:'Scoreboard',menu:'Pause / resume',
+  up:'Menu up',down:'Menu down',left:'Menu left',right:'Menu right'
+};
+
 export const CALIBRATION_STEPS = [
   ['a','A'],['b','B'],['x','X'],['y','Y'],['lb','LB'],['rb','RB'],
   ['lt','LT (left trigger)'],['rt','RT (right trigger)'],
@@ -152,7 +158,7 @@ export function assignGamepadBinding(profile,action,binding) {
   return {profile:next,conflicts};
 }
 
-export function createGamepadCalibration(pad, profile=null, only=null, platform) {
+export function createGamepadCalibration(pad, profile=null, only=null, platform, confirmTwice=true) {
   const steps=only ? CALIBRATION_STEPS.filter(([name])=>name===only) : CALIBRATION_STEPS;
   let bindings=only ? {...profile} : {};
   const fallback=defaultGamepadProfile(pad,platform);
@@ -192,6 +198,7 @@ export function createGamepadCalibration(pad, profile=null, only=null, platform)
     get index() { return step; },
     get total() { return steps.length; },
     get profile() { return step===steps.length ? bindings : null; },
+    get captured() { return only&&step===steps.length ? bindings[only] : null; },
     skip() {
       if(steps[step]?.[0]==='view')advance(null);
     },
@@ -214,7 +221,7 @@ export function createGamepadCalibration(pad, profile=null, only=null, platform)
             baseline.axes[candidate.index]=value;
           }else if(current>=.15)return 'Release the control.';
         }else if(current>=.15)return 'Release the control.';
-        if(confirm){
+        if(confirm||!confirmTwice){
           advance(candidate);
           return '';
         }

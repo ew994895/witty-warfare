@@ -143,3 +143,182 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .controller-setup-actions input[type=number]{width:90px;background:#172a23;color:var(--paper);border:1px solid #78936b60;border-radius:3px;padding:5px}
 #controllerBindingStatus{flex-basis:100%}
 #controllerLastRaw{color:var(--yellow)}
+
+.controller-action-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: grid;
+  gap: 3px;
+}
+.controller-action-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #d6e4d5;
+  font-size: 12px;
+}
+.controller-action-list button {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid #78936b60;
+  border-radius: 3px;
+  background: #172a23;
+  color: var(--yellow);
+  font-size: 11px;
+}
+@media (pointer: coarse) {
+  .controller-action-list button { min-height: 44px; }
+}
+
+/* Keep the arena and HUD on the same visible viewport as mobile toolbars resize. */
+@media (max-width: 800px), (max-height: 540px) {
+  :root {
+    --hud-top: calc(env(safe-area-inset-top, 0px) + 8px);
+    --hud-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    --hud-left: calc(env(safe-area-inset-left, 0px) + 10px);
+    --hud-right: calc(env(safe-area-inset-right, 0px) + 10px);
+  }
+
+  #game, #hud, .overlay {
+    position: fixed;
+    inset: 0;
+    height: 100vh;
+    height: 100dvh;
+  }
+  .hud-header {
+    position: absolute;
+    inset: var(--hud-top) var(--hud-right) auto var(--hud-left);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-items: start;
+    align-items: start;
+    gap: 3px 6px;
+    z-index: 6;
+  }
+  #hud .hud-top {
+    position: static;
+    grid-area: 1 / 1 / 2 / 3;
+    justify-self: stretch;
+    align-items: start;
+    z-index: auto;
+  }
+  .hud-top .mini-brand { display: none; }
+  .hud-top .scoreboard {
+    min-width: 0;
+    padding: 4px 8px;
+    gap: 2px 8px;
+  }
+  .hud-top .scoreboard > span { font-size: 23px; line-height: 1; }
+  .hud-top .scoreboard > small { font-size: 8px; letter-spacing: .5px; }
+  .hud-top #pauseBtn { padding: 7px 9px; margin: 0; }
+  .hud-header #teamHud,
+  .hud-header #modeHud,
+  .hud-header #objectiveHud,
+  .hud-header #hudMap,
+  .hud-header #onlineStatus,
+  .hud-header #roomControls,
+  #hud:has(#objectiveHud:not([hidden])) #teamHud,
+  #hud .hud-header #mouseNotice {
+    position: static;
+    transform: none;
+    max-width: 100%;
+  }
+  .hud-header #teamHud, .hud-header #modeHud {
+    grid-row: 2;
+    grid-column: 1;
+    font-size: 10px;
+    gap: 3px;
+    flex-wrap: wrap;
+    justify-content: start;
+    white-space: normal;
+  }
+  .hud-header .team-tally span { padding: 2px 4px; }
+  .hud-header #objectiveHud {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    padding: 3px 6px;
+    font-size: 10px;
+    letter-spacing: 0;
+    text-align: left;
+  }
+  .hud-header #onlineStatus, .hud-header #roomControls, .hud-header #hudMap {
+    grid-column: 2;
+    justify-self: end;
+    text-align: right;
+    letter-spacing: 0;
+  }
+  .hud-header #onlineStatus { grid-row: 2; font-size: 9px; }
+  .hud-header #hudMap { grid-row: 4; padding: 2px 4px; font-size: 9px; }
+  .hud-header #roomControls { grid-row: 5; }
+  .hud-header #roomControls button { padding: 3px 5px; margin-left: 3px; }
+  #hud .hud-header #mouseNotice {
+    grid-column: 1 / -1;
+    grid-row: 6;
+    padding: 3px 5px;
+  }
+
+  .hud-bottom { inset: auto var(--hud-right) var(--hud-bottom) var(--hud-left); gap: 8px; }
+  .health-card, .weapon-hud { min-width: 0; width: auto; max-width: 52%; }
+  .health-card strong, .weapon-hud strong { font-size: 33px; }
+  .weapon-hud div { margin: 3px 0; }
+  .weapon-hud .inventory { display: none; }
+  .weapon-hud #reloadLabel { font-size: 8px; }
+  .hud-bottom .momentum { display: none; }
+  #spawnProtection {
+    width: auto;
+    inset: auto var(--hud-right) calc(var(--hud-bottom) + 58px) auto;
+    font-size: 8px;
+    letter-spacing: .4px;
+  }
+  #feed {
+    inset: auto var(--hud-right) calc(var(--hud-bottom) + 72px) auto;
+    max-width: 43%;
+    font-size: 9px;
+    line-height: 1.4;
+  }
+  #feed div { padding: 2px 5px; margin: 2px 0; }
+  .hud-notification {
+    position: absolute;
+    inset: auto auto calc(var(--hud-bottom) + 72px) var(--hud-left);
+    width: 46%;
+    z-index: 5;
+  }
+  .hud-notification #message, .hud-notification #messageSub {
+    position: static;
+    width: auto;
+    padding: 0;
+    text-align: left;
+  }
+  .hud-notification #message { font-size: 15px; letter-spacing: .5px; }
+  .hud-notification #messageSub { font-size: 9px; letter-spacing: 0; }
+  #leaderboard {
+    max-height: calc(100dvh - var(--hud-top) - var(--hud-bottom));
+    overflow: hidden;
+    padding: 8px 12px;
+  }
+  .board-title { margin-bottom: 4px; font-size: 19px; }
+  .board-head, #boardRows > div { padding: 4px; gap: 5px; }
+  .overlay { padding: var(--hud-top) var(--hud-right) var(--hud-bottom) var(--hud-left); }
+  .overlay .dialog { max-height: 100%; max-width: 100%; }
+  .screen { padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .hud-header { grid-template-columns: minmax(0, 1fr) minmax(0, 38%); }
+  .hud-header #objectiveHud { grid-column: 1; max-width: 260px; }
+  .hud-header #hudMap { grid-row: 3; }
+  .hud-header #roomControls { grid-row: 4; }
+  #feed div:nth-child(n + 3) { display: none; }
+}
+@media (max-width: 800px), (max-height: 540px) {
+  .screen {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+@media (orientation: landscape) and (max-height: 340px) {
+  .hud-notification, #feed { bottom: calc(var(--hud-bottom) + 60px); }
+  #feed div:nth-child(n + 2) { display: none; }
+}

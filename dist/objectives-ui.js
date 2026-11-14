@@ -103,8 +103,8 @@ export function createObjectiveDisplay(scene,markerLayer,summary){
         const x=behind?(facing.x<0?-.92:.92):Math.max(-.91,Math.min(.91,vector.x));
         const y=behind?0:Math.max(-.72,Math.min(.7,vector.y));
         label.hidden=false;
-        label.style.left=(x*.5+.5)*innerWidth+'px';
-        label.style.top=(-y*.5+.5)*innerHeight+'px';
+        label.style.left=(x*.5+.5)*100+'%';
+        label.style.top=(-y*.5+.5)*100+'%';
         const horizontal=behind||Math.abs(vector.x)>=Math.abs(vector.y);
         const direction=onScreen?'':horizontal?(x<0?'‹ ':'› '):(y>0?'↑ ':'↓ ');
         const text=`${direction}${marker.title} · ${Math.round(distance)}m`;
