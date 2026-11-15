@@ -2,7 +2,7 @@ import {ArenaObjectives} from './objectives.js';
 import {MAPS,createMap,getMap} from '../dist/maps.js';
 import {STEP,WEAPONS,createPlayer,createArsenal,stepMovement,createNav,trace,meleeTrace,clamp,damp,switchWeapon,tickArsenal,startReload,fireRound} from '../dist/core.js';
 import {VOTE_SECONDS,nextArena} from '../dist/rounds.js';
-import {BOT_SKILLS,CTF_OVERTIME_SECONDS,GUN_ORDER,MAX_PLAYERS,STORM_LIVES,TEAMS,humanLimit,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormRadius,teamWinner} from '../dist/rules.js';
+import {BOT_SKILLS,GUN_ORDER,MAX_PLAYERS,STORM_LIVES,TEAMS,humanLimit,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormRadius,teamWinner} from '../dist/rules.js';
 export {VOTE_SECONDS};
 export const CAPACITY=MAX_PLAYERS;
 export const poseKeys=['x','z','feet','vx','vz','vy','yaw','pitch','grounded','crouch','slide','slideReady','eye','hp','dead','shield','kills','deaths','score'];
@@ -21,7 +21,7 @@ export class Match{
    this.nav=createNav(this.map.solids,this.map.navBounds);
    this.configure(roomSettings(this.ranked?{rules:'tdm',botCount:0}:config));
    this.time=0;
-   this.overtime=false;
+   this.overtimeStartedAt=null;
    const waiting=!this.public&&config.intermission===true;
    this.remaining=waiting?0:this.duration;
    this.phase=this.ranked?'staging':waiting?'results':'playing';
@@ -46,6 +46,7 @@ export class Match{
    this.duration=settings.duration;
    this.difficulty=settings.difficulty;
  }
+ get overtime(){return this.overtimeStartedAt!==null;}
  actor(id,name,bot=false,primary=0){const p=this.map.spawns[this.actors.length%this.map.spawns.length];return {...createPlayer(...p),id,name:cleanName(name),bot,arsenal:createArsenal(primary),queue:[],ack:-1,received:-1,inputAge:0,lastHurt:-20,streak:0,bestStreak:0,shots:0,hits:0,headshots:0,navTime:0,path:[]};}
  addBot(n,team){
    const names=['MOSS','BRICK','GLITCH','DUNE','ECHO','FLINT','NOVA','PIXEL'];
@@ -363,10 +364,11 @@ export class Match{
    forward,side,jump:false,crouch:false,aim:Boolean(sees),fire:Boolean(sees&&(!melee||dist<1.8)&&a.botReact===0&&target.shield===0),
    fresh:true,weapon:a.arsenal.index,reload:a.arsenal.mags[a.arsenal.index]===0};
  }
- step(){if(this.phase==='results'){if(!this.public)return;this.voteRemaining=Math.max(0,this.voteRemaining-STEP);if(!this.voteRemaining)this.beginRound(this.chooseNextMap());return;}if(this.phase!=='playing')return;this.time+=STEP;this.remaining=Math.max(0,this.remaining-STEP);if(!this.remaining){
-   if(this.settings.ctfOvertime&&!this.overtime&&!teamWinner(this.teamScores)){
-     this.overtime=true;
-     this.remaining=CTF_OVERTIME_SECONDS;
+ step(){if(this.phase==='results'){if(!this.public)return;this.voteRemaining=Math.max(0,this.voteRemaining-STEP);if(!this.voteRemaining)this.beginRound(this.chooseNextMap());return;}if(this.phase!=='playing')return;this.time+=STEP;
+ if(!this.overtime)this.remaining=Math.max(0,this.remaining-STEP);
+ if(!this.overtime&&!this.remaining){
+   if(this.settings.ctfOvertime&&!teamWinner(this.teamScores)){
+     this.overtimeStartedAt=this.time;
      return;
    }
    if(this.settings.rules==='storm'){
@@ -403,7 +405,7 @@ export class Match{
    this.map=createMap(mapId);
    this.nav=createNav(this.map.solids,this.map.navBounds);
    this.remaining=this.duration;
-   this.overtime=false;
+   this.overtimeStartedAt=null;
    this.phase='playing';
    this.round++;
    this.history=[];
@@ -430,5 +432,5 @@ export class Match{
    this.beginRound(this.chooseNextMap());
    return true;
  }
- snapshot(){return {phase:this.phase,round:this.round,mapId:this.map.id,remaining:this.remaining,overtime:this.overtime,roundWinner:this.roundWinner,zoneRadius:this.settings.rules==='storm'?stormRadius(this.map,this.duration-this.remaining,this.duration):undefined,rules:this.settings.rules,scoreLimit:this.settings.scoreLimit,teamScores:this.teamScores,objective:this.objectives?.snapshot(),settings:this.public||this.ranked?undefined:this.settings,nextSettings:this.nextSettings,host:this.host,voteRemaining:this.voteRemaining,voteCounts:this.voteCounts(),votes:Object.fromEntries(this.votes),actors:this.actors.map(a=>({id:a.id,name:a.name,bot:a.bot,objectiveScore:a.objectiveScore,lives:a.lives,stage:a.stage,inactive:a.inactive,waitingForRound:a.waitingForRound,team:a.team,teamPreference:a.teamPreference,skill:a.skill,ack:a.ack,...Object.fromEntries(poseKeys.map(k=>[k,a[k]])),primary:a.arsenal.primary,pendingPrimary:a.nextPrimary??a.arsenal.primary,life:a.life||0,streak:a.streak,bestStreak:a.bestStreak,shots:a.shots,hits:a.hits,headshots:a.headshots})),eventId:this.eventId};}
+ snapshot(){return {phase:this.phase,round:this.round,mapId:this.map.id,remaining:this.remaining,overtime:this.overtime,overtimeElapsed:this.overtime?this.time-this.overtimeStartedAt:undefined,roundWinner:this.roundWinner,zoneRadius:this.settings.rules==='storm'?stormRadius(this.map,this.duration-this.remaining,this.duration):undefined,rules:this.settings.rules,scoreLimit:this.settings.scoreLimit,teamScores:this.teamScores,objective:this.objectives?.snapshot(),settings:this.public||this.ranked?undefined:this.settings,nextSettings:this.nextSettings,host:this.host,voteRemaining:this.voteRemaining,voteCounts:this.voteCounts(),votes:Object.fromEntries(this.votes),actors:this.actors.map(a=>({id:a.id,name:a.name,bot:a.bot,objectiveScore:a.objectiveScore,lives:a.lives,stage:a.stage,inactive:a.inactive,waitingForRound:a.waitingForRound,team:a.team,teamPreference:a.teamPreference,skill:a.skill,ack:a.ack,...Object.fromEntries(poseKeys.map(k=>[k,a[k]])),primary:a.arsenal.primary,pendingPrimary:a.nextPrimary??a.arsenal.primary,life:a.life||0,streak:a.streak,bestStreak:a.bestStreak,shots:a.shots,hits:a.hits,headshots:a.headshots})),eventId:this.eventId};}
 }

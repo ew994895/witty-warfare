@@ -22,7 +22,6 @@ export function defaultScoreLimit(rules) {
 }
 export const GUN_ORDER = [0,3,4,5,2,1,6,7];
 export const STORM_LIVES = 3;
-export const CTF_OVERTIME_SECONDS = 60;
 
 export function gameRules(value) {
   return Object.hasOwn(GAME_RULES,value) ? value : 'ffa';
@@ -55,7 +54,7 @@ export function roomSettings(value = {}) {
       DIFFICULTIES.includes(value.botSkills?.[i]) ? value.botSkills[i] : 'default'),
     duration: [120, 180, 300].includes(value.duration) ? value.duration : 180,
     scoreLimit: scoreLimits(rules).includes(value.scoreLimit)?value.scoreLimit:defaultScoreLimit(rules),
-    ctfOvertime: rules === 'ctf' && value.ctfOvertime === true,
+    ctfOvertime: rules === 'ctf' && (value.ctfOvertime ?? true) === true,
     friendlyFire: isTeamGame(rules) && value.friendlyFire === true,
     respawnTime: [1.25, 2.5, 4].includes(value.respawnTime) ? value.respawnTime : 1.25
   };

@@ -168,8 +168,23 @@ test('bots prioritize objectives and the next map rebuilds objectives and contri
   assert.deepEqual(match.teamScores,{blue:0,red:0});
 });
 
-test('enabled Flag overtime preserves the tied match and the next real capture wins',()=>{
-  const [match,blue]=duel('ctf',{ctfOvertime:true,scoreLimit:0});
+test('Capture the Flag normally ends at three captures without overtime',()=>{
+  const [match,blue]=duel('ctf');
+  const [blueFlag,redFlag]=match.objectives.flags;
+  for(let captures=1;captures<=3;captures++){
+    place(blue,redFlag.home);
+    match.step();
+    assert.equal(redFlag.carrier,blue.id);
+    place(blue,blueFlag.home);
+    match.step();
+    assert.equal(match.teamScores.blue,captures);
+    assert.equal(match.phase,captures===3?'results':'playing');
+  }
+  assert.equal(match.snapshot().overtime,false);
+});
+
+test('Flag overtime carries over the scores and flags until a capture wins',()=>{
+  const [match,blue]=duel('ctf');
   const [blueFlag,redFlag]=match.objectives.flags;
   match.teamScores={blue:1,red:1};
   place(blue,redFlag.home);
@@ -182,9 +197,17 @@ test('enabled Flag overtime preserves the tied match and the next real capture w
   assert.equal(overtime.phase,'playing');
   assert.equal(overtime.round,1);
   assert.equal(overtime.overtime,true);
-  assert.equal(overtime.remaining,60);
+  assert.equal(overtime.remaining,0);
+  assert.equal(overtime.overtimeElapsed,0);
   assert.deepEqual(overtime.teamScores,{blue:1,red:1});
   assert.equal(overtime.objective.flags[1].carrier,blue.id);
+
+  for(let i=0;i<Math.ceil(600/STEP);i++)match.step();
+  const extended=match.snapshot();
+  assert.equal(extended.phase,'playing');
+  assert.ok(extended.overtimeElapsed>599);
+  assert.equal(extended.remaining,0);
+  assert.equal(extended.objective.flags[1].carrier,blue.id);
 
   place(blue,blueFlag.home);
   match.step();
@@ -193,25 +216,15 @@ test('enabled Flag overtime preserves the tied match and the next real capture w
 
   assert.ok(match.restart(blue.id,match.round));
   assert.equal(match.snapshot().overtime,false);
+  assert.equal(match.snapshot().overtimeElapsed,undefined);
+  assert.equal(match.remaining,match.duration);
   assert.equal(match.settings.ctfOvertime,true);
 });
 
-test('Flag overtime expires in a draw and cannot restart itself',()=>{
-  const [match]=duel('ctf',{ctfOvertime:true});
-  match.remaining=STEP;
-  match.step();
-  assert.equal(match.snapshot().overtime,true);
-  match.remaining=STEP;
-  match.step();
-  assert.equal(match.phase,'results');
-  assert.equal(match.remaining,0);
-  assert.deepEqual(match.teamScores,{blue:0,red:0});
-});
-
-test('only opted-in and tied Capture the Flag rounds reach overtime',()=>{
+test('only tied Capture the Flag rounds with overtime enabled reach sudden death',()=>{
   for(const [rules,options,scores] of [
-    ['ctf',{},{blue:0,red:0}],
-    ['ctf',{ctfOvertime:true},{blue:1,red:0}],
+    ['ctf',{ctfOvertime:false},{blue:0,red:0}],
+    ['ctf',{},{blue:1,red:0}],
     ['hardpoint',{ctfOvertime:true},{blue:0,red:0}]
   ]){
     const [match]=duel(rules,options);
@@ -225,7 +238,7 @@ test('only opted-in and tied Capture the Flag rounds reach overtime',()=>{
 });
 
 test('a host can queue the Flag overtime option for the next round',()=>{
-  const [match,host,guest]=duel('ctf',{scoreLimit:1});
+  const [match,host,guest]=duel('ctf',{scoreLimit:1,ctfOvertime:false});
   const settings={...match.settings,ctfOvertime:true};
   assert.equal(match.queueSettings(guest.id,settings,match.round),false);
   assert.equal(match.queueSettings(host.id,settings,match.round),true);
