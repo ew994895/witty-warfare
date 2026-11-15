@@ -7,6 +7,44 @@ const ringGeometry=radius=>new THREE.RingGeometry(radius-.09,radius,48).rotateX(
 const shapes={zone:ringGeometry(3.25),flag:ringGeometry(1.55),tag:ringGeometry(.48)};
 const vector=new THREE.Vector3();
 const facing=new THREE.Vector3();
+const EDGE_MARGIN=7;
+
+const tagShape=new THREE.Shape();
+tagShape.moveTo(-.16,-.22);
+tagShape.lineTo(.16,-.22);
+tagShape.lineTo(.22,-.16);
+tagShape.lineTo(.22,.17);
+tagShape.lineTo(.13,.26);
+tagShape.lineTo(-.13,.26);
+tagShape.lineTo(-.22,.17);
+tagShape.lineTo(-.22,-.16);
+tagShape.closePath();
+const tagHole=new THREE.Path();
+tagHole.absarc(0,.145,.049,0,Math.PI*2,true);
+tagShape.holes.push(tagHole);
+const tagPlate=new THREE.ExtrudeGeometry(tagShape,{depth:.045,bevelSize:.018,bevelThickness:.015,bevelSegments:1});
+const tagGroove=new THREE.BoxGeometry(.29,.027,.01);
+const tagDetail=new THREE.MeshBasicMaterial({color:0x23343b});
+const tagColors={enemy:0xffc872,friendly:0x91dbff};
+const tagMetals={
+  enemy:new THREE.MeshStandardMaterial({color:tagColors.enemy,emissive:0x685026,emissiveIntensity:.45,roughness:.52}),
+  friendly:new THREE.MeshStandardMaterial({color:tagColors.friendly,emissive:0x2e4d68,emissiveIntensity:.45,roughness:.52})
+};
+function createTag(){
+  const token=new THREE.Group();
+  for(const side of [-1,1]){
+    const plate=new THREE.Mesh(tagPlate,tagMetals.enemy);
+    plate.position.set(side*.17,side*.055,side*.075);
+    plate.rotation.set(side*.12,side*.3,side*-.22);
+    for(const y of [-.08,-.145]){
+      const groove=new THREE.Mesh(tagGroove,tagDetail);
+      groove.position.set(0,y,.059);
+      plate.add(groove);
+    }
+    token.add(plate);
+  }
+  return token;
+}
 
 function presentation(rules,data,player){
   if(rules==='hardpoint'){
@@ -63,6 +101,7 @@ export function createObjectiveDisplay(scene,markerLayer,summary){
       for(const [id,item] of items){
         if(ids.has(id))continue;
         scene.remove(item.ring);
+        if(item.tag)scene.remove(item.tag);
         item.ring.material.dispose();
         item.label.remove();
         items.delete(id);
@@ -77,23 +116,40 @@ export function createObjectiveDisplay(scene,markerLayer,summary){
           label.className='objective-marker';
           scene.add(ring);
           markerLayer.append(label);
-          item={ring,label};
+          const tag=marker.kind==='tag'?createTag():null;
+          if(tag)scene.add(tag);
+          item={ring,label,tag};
           items.set(marker.id,item);
         }
         item.marker=marker;
-        item.ring.material.color.setHex(colors[marker.team||'neutral']);
+        const kit=marker.team===player.team?'friendly':'enemy';
+        item.ring.material.color.setHex(item.tag?tagColors[kit]:colors[marker.team||'neutral']);
         item.ring.position.set(marker.x,marker.y+.08,marker.z);
-        item.label.dataset.team=marker.team||'neutral';
+        item.label.dataset.team=item.tag?kit:marker.team||'neutral';
+        if(item.tag)for(const plate of item.tag.children)plate.material=tagMetals[kit];
       }
     },
-    render(camera,playing){
+    render(camera,playing,width,height,time,reducedMotion){
       const visible=enabled&&playing;
       markerLayer.hidden=!visible;
-      for(const {ring,label,marker} of items.values()){
+      const markers=[];
+      for(const item of items.values()){
+        const {ring,label,tag,marker}=item;
         const distance=Math.hypot(marker.x-localPlayer.x,marker.z-localPlayer.z);
         ring.visible=visible&&(marker.kind!=='tag'||distance<=25);
+        if(tag){
+          tag.visible=ring.visible;
+          if(tag.visible){
+            const offset=marker.x*.17+marker.z*.11;
+            tag.position.set(marker.x,marker.y+.57+(reducedMotion?0:Math.sin(time*3+offset)*.09),marker.z);
+            tag.rotation.y=offset+(reducedMotion?0:time*1.7);
+          }
+        }
         label.hidden=true;
-        if(!visible||(marker.kind==='tag'&&distance>22))continue;
+        if(visible&&(marker.kind!=='tag'||distance<=22))markers.push({label,marker,distance});
+      }
+      const occupied=[];
+      for(const {label,marker,distance} of markers.sort((a,b)=>a.distance-b.distance)){
         vector.set(marker.x,marker.y+(marker.kind==='tag'?.55:1.85),marker.z);
         facing.copy(vector).applyMatrix4(camera.matrixWorldInverse);
         vector.project(camera);
@@ -102,12 +158,17 @@ export function createObjectiveDisplay(scene,markerLayer,summary){
         if(marker.kind==='tag'&&!onScreen)continue;
         const x=behind?(facing.x<0?-.92:.92):Math.max(-.91,Math.min(.91,vector.x));
         const y=behind?0:Math.max(-.72,Math.min(.7,vector.y));
-        label.hidden=false;
-        label.style.left=(x*.5+.5)*100+'%';
-        label.style.top=(-y*.5+.5)*100+'%';
         const horizontal=behind||Math.abs(vector.x)>=Math.abs(vector.y);
         const direction=onScreen?'':horizontal?(x<0?'‹ ':'› '):(y>0?'↑ ':'↓ ');
         const text=`${direction}${marker.title} · ${Math.round(distance)}m`;
+        const halfWidth=Math.min(width/2-EDGE_MARGIN,(text.length*6+14)/2);
+        const left=Math.max(halfWidth+EDGE_MARGIN,Math.min(width-halfWidth-EDGE_MARGIN,(x*.5+.5)*width));
+        const top=(-y*.5+.5)*height;
+        if(occupied.some(spot=>Math.abs(spot.top-top)<20&&Math.abs(spot.left-left)<spot.halfWidth+halfWidth+4))continue;
+        occupied.push({left,top,halfWidth});
+        label.hidden=false;
+        label.style.left=left+'px';
+        label.style.top=top+'px';
         if(label.textContent!==text)label.textContent=text;
       }
     }

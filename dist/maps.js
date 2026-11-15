@@ -1,8 +1,8 @@
 // Map definitions share the same geometry with rendering, collisions and route tests.
 export const MAPS = [
- {id:'switchyard',name:'Switchyard',size:'SMALL',half:18,tag:'CLOSE & QUICK',description:'Tight container lanes, low cover and a fast outer loop. Bring an SMG or shotgun.',sky:0xa4bac3,fog:0xb6c8c9,ground:0x889b9c,sun:0xffe3b5,light:3.2,preview:[23,19,27],look:[0,0,0],sight:28,botSpeed:3.5,spawns:[[-13,13],[13,-13],[-13,-13],[13,13],[0,-14],[0,14],[-14,0],[14,0],[-3,9],[3,-9]],practice:[[-13,13],[-13,1]]},
- {id:'dust-court',name:'Dust Court',size:'MEDIUM',half:29,tag:'ALL-ROUND ARENA',description:'The original courtyard. Mix central duels, jumpable cover and wide side routes.',sky:0x8faeb3,fog:0xa6bbba,ground:0xadb09a,sun:0xffe1b5,light:3.5,preview:[12,14,24],look:[-4,0,-5],sight:34,botSpeed:3.5,spawns:[[1,14],[-15,-2],[14,2],[0,-13],[-13,17],[12,-14],[-15,6],[6,17],[-7,-14],[15,-5]],practice:[[1,14],[1,-13]]},
- {id:'pine-ridge',name:'Pine Ridge',size:'LARGE',half:42,tag:'RANGE & ROUTES',description:'A mountain outpost with long lanes, raised firing pads and covered flanks. Room to build speed.',sky:0xadc7d5,fog:0xb9cfd7,ground:0x93a79a,sun:0xe5f2ff,light:2.7,preview:[34,29,39],look:[0,0,-4],sight:56,botSpeed:4.3,spawns:[[-33,30],[33,-30],[-33,-30],[33,30],[0,-33],[0,33],[-33,0],[33,0],[-16,-9],[16,9],[-9,20],[9,-20]],practice:[[-33,30],[-33,12]]}
+ {id:'switchyard',name:'Switchyard',size:'SMALL',half:18,stormCenter:{x:-7,z:1},tag:'CLOSE & QUICK',description:'Tight container lanes, low cover and a fast outer loop. Bring an SMG or shotgun.',sky:0xa4bac3,fog:0xb6c8c9,ground:0x889b9c,sun:0xffe3b5,light:3.2,preview:[23,19,27],look:[0,0,0],sight:28,botSpeed:3.5,spawns:[[-13,13],[13,-13],[-13,-13],[13,13],[0,-14],[0,14],[-14,0],[14,0],[-3,9],[3,-9]],practice:[[-13,13],[-13,1]]},
+ {id:'dust-court',name:'Dust Court',size:'MEDIUM',half:29,stormCenter:{x:0,z:5},tag:'ALL-ROUND ARENA',description:'The original courtyard. Mix central duels, jumpable cover and wide side routes.',sky:0x8faeb3,fog:0xa6bbba,ground:0xadb09a,sun:0xffe1b5,light:3.5,preview:[12,14,24],look:[-4,0,-5],sight:34,botSpeed:3.5,spawns:[[1,14],[-15,-2],[14,2],[0,-13],[-13,17],[12,-14],[-15,6],[6,17],[-7,-14],[15,-5]],practice:[[1,14],[1,-13]]},
+ {id:'pine-ridge',name:'Pine Ridge',size:'LARGE',half:42,stormCenter:{x:0,z:11},tag:'RANGE & ROUTES',description:'A mountain outpost with long lanes, raised firing pads and covered flanks. Room to build speed.',sky:0xadc7d5,fog:0xb9cfd7,ground:0x93a79a,sun:0xe5f2ff,light:2.7,preview:[34,29,39],look:[0,0,-4],sight:56,botSpeed:4.3,spawns:[[-33,30],[33,-30],[-33,-30],[33,30],[0,-33],[0,33],[-33,0],[33,0],[-16,-9],[16,9],[-9,20],[9,-20]],practice:[[-33,30],[-33,12]]}
 ];
 export function getMap(id){return MAPS.find(m=>m.id===id)||MAPS[1];}
 export function createMap(id){
@@ -55,5 +55,7 @@ export function createMap(id){
   for(let i=0;i<15;i++)box(-2.5,.045,-35+i*5,.2,.025,2,0xe5e4bc);
  }
  const solids=boxes.filter(b=>b.solid).map(b=>({x:b.position.x,z:b.position.z,w:b.size[0]/2,d:b.size[2]/2,h:b.position.y+b.size[1]/2}));
- return {...config,boxes,solids,spawns:config.spawns.map(p=>[...p]),navBounds:{minX:-config.half+.75,maxX:config.half-.75,minZ:-config.half+.75,maxZ:config.half-.75,cell:1.5}};
+ const {x:stormX,z:stormZ}=config.stormCenter;
+ const stormStartRadius=Math.max(...config.spawns.map(([x,z])=>Math.hypot(x-stormX,z-stormZ)))+4;
+ return {...config,stormCenter:{...config.stormCenter},stormStartRadius,boxes,solids,spawns:config.spawns.map(p=>[...p]),navBounds:{minX:-config.half+.75,maxX:config.half-.75,minZ:-config.half+.75,maxZ:config.half-.75,cell:1.5}};
 }

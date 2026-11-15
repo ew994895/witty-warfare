@@ -55,7 +55,7 @@ Every mode shows standings, lets you vote on the next map, and lets you pick you
 
 In Team Deathmatch, an enemy elimination adds one to the team's score. The highest team score wins when time expires, or a team can win early by reaching the kill limit. Public TDM and Vs AI default to 30 kills with friendly fire off. Vs AI plays 3v3. In mixed custom TDM, players can request a team for the next round, subject to available space. Humans vs Bots puts players on Blue and bots on Red.
 
-Custom hosts can open **Esc → Host controls** during play or open the same controls on the results screen. On the results screen, use **Save Next Match Rules** to save changes while everyone waits, or apply the form directly with **Start Next Match**. The map vote closes when the host starts. Everyone keeps the same room and invite. The server rejects a new cap that would displace a connected or reconnecting player. Set bots to **0** for human-only matches, **Fill open slots** for automatic backfill, or a fixed maximum. Choose one skill for the room, random skills, or overrides for named bots.
+Custom hosts can open **Esc → Host controls** during play or open the same controls on the results screen. On the results screen, use **Save Next Match Rules** to save changes while everyone waits, or apply the form directly with **Start Next Match**. The map vote closes when the host starts. The pause menu also contains the room invite and opens the same Settings dialog as the lobby. Everyone keeps the same room and invite. The server rejects a new cap that would displace a connected or reconnecting player. Set bots to **0** for human-only matches, **Fill open slots** for automatic backfill, or a fixed maximum. Choose one skill for the room, random skills, or overrides for named bots.
 
 Run `npm install` then `npm run dev` for the full local Worker and matchmaking service. Open the printed localhost URL.
 
@@ -94,7 +94,7 @@ Five completed placement matches unlock a player's visible rating and eligibilit
 
 **Gun Game** starts everyone on Ranger and advances the weapon after each elimination. The eighth stage is the knife. Complete that stage to win early, or finish with the highest weapon stage when time expires.
 
-**Storm Survival** gives each player three lives and a safe zone that starts shrinking after 15 seconds. The storm damages players outside the ring. Players who join after the grace period wait for the next round. The last survivor wins. At the time limit, remaining lives and then eliminations break ties.
+**Storm Survival** gives each player three lives. The shared storm wall and radar show the safe area, which starts shrinking after 15 seconds. The storm damages players outside the ring. Bots move to safety ahead of the wall and fight each other at a slower pace. Players who join after the grace period wait for the next round. The last survivor wins. At the time limit, remaining lives and then eliminations break ties.
 
 Custom Rooms can switch to Gun Game or Storm Survival in Host controls between matches. Run `node tests/ranked.integration.mjs` against a fresh local Worker to verify eight-player matchmaking, reserved reconnects, new playlists, and saved Ranked results.
 
@@ -106,6 +106,6 @@ Quick Play and Custom Rooms offer four Blue vs Red objective modes on every aren
 - **Hardpoint.** Hold the active hill uncontested to score one point per second. The hill moves every 30 seconds. The default target is 75 points.
 - **Domination.** Hold A, B, or C uncontested for two seconds to capture it. Each owned zone scores one point every two seconds. The default target is 100 points.
 - **Capture the Flag.** Bring the enemy flag to your base while your own flag is home. Touch a dropped friendly flag to return it, or wait for its 15-second return. The default target is three captures.
-- **Kill Confirmed.** Collect enemy tags to score. Collect friendly tags to deny the point. Tags expire after 15 seconds. The default target is 30 confirms.
+- **Kill Confirmed.** Collect gold enemy dog tags to score. Recover blue friendly tags to deny the point. Tags expire after 15 seconds. The default target is 30 confirms.
 
 The team ahead at the time limit wins. Tied Capture the Flag rounds go into untimed sudden death with the current scores and flags. The next capture wins. Custom room hosts can turn **Flag overtime** off to allow a draw at the time limit. Ties in the other objective modes end in a draw. Run `node tests/objectives.integration.mjs` against a local Worker to verify the four playlists and a two-player flag capture followed by a map and mode change.

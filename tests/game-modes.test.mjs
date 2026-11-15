@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {GUN_ORDER,stormRadius} from '../dist/rules.js';
+import {STEP,overlap} from '../dist/core.js';
+import {MAPS} from '../dist/maps.js';
+import {GUN_ORDER,STORM_FINAL_RADIUS,stormDistance,stormRadius} from '../dist/rules.js';
 import {Match} from '../server/match.js';
 
 test('Gun Game locks the weapon, promotes on eliminations, and ends on the final knife stage',()=>{
@@ -29,7 +31,7 @@ test('Storm Survival shrinks the zone, consumes lives, and keeps late joiners ou
   assert.equal(a.lives,3);
   match.stormTick();
   match.remaining=10;
-  assert.ok(stormRadius(match.map,170,180)<10);
+  assert.ok(stormRadius(match.map,170,180)<13);
   const late=match.join('late','Late');
   assert.ok(late.waitingForRound&&late.inactive);
   Object.assign(a,{x:0,z:0});
@@ -45,4 +47,21 @@ test('Storm Survival shrinks the zone, consumes lives, and keeps late joiners ou
   assert.ok(match.restart(a.id,match.round));
   assert.equal(late.inactive,false);
   assert.equal(late.lives,3);
+});
+
+test('Storm bots survive the opening and final-circle spawns stay on open ground in every arena',()=>{
+  for(const map of MAPS){
+    const match=new Match({rules:'storm',mapId:map.id},()=>.5);
+    match.join('human','Player');
+    for(let i=0;i<30/STEP;i++)match.step();
+    assert.equal(match.actors.filter(actor=>actor.bot&&!actor.inactive).length,7,map.id);
+
+    match.remaining=.01;
+    const spawns=match.stormSpawns();
+    assert.ok(spawns.length>=3,map.id);
+    for(const [x,z] of spawns){
+      assert.ok(stormDistance(match.map,{x,z})<STORM_FINAL_RADIUS,map.id);
+      assert.ok(!match.map.solids.some(solid=>overlap(x,z,solid,.5)),map.id);
+    }
+  }
 });

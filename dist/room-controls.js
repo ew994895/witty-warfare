@@ -1,4 +1,4 @@
-import {DIFFICULTIES,GAME_RULES,OBJECTIVE_RULES,defaultScoreLimit,isObjective,isTeamGame,roomSettings,scoreLimits} from './rules.js?v=23';
+import {DIFFICULTIES,GAME_RULES,OBJECTIVE_RULES,defaultScoreLimit,isObjective,isTeamGame,roomSettings,scoreLimits} from './rules.js?v=24';
 
 const skillLabels = {
   default: 'Use room difficulty',

@@ -1,7 +1,8 @@
-import {isTeamGame,teamWinner} from '../dist/rules.js';
+import {comparePlacements,isTeamGame,teamWinner} from '../dist/rules.js';
 
 export function roundRecord(match, id) {
-  const order = (a,b) => (match.settings.scoreLimit ? b.kills-a.kills : 0) || b.score-a.score;
+  const {rules,scoreLimit} = match.settings;
+  const order = (a,b) => comparePlacements(rules,scoreLimit,a,b);
   const [first,second] = [...match.actors].sort(order);
   const soloWinner = first && (!second || order(first,second) < 0) ? first : null;
   const winningTeam = teamWinner(match.teamScores);

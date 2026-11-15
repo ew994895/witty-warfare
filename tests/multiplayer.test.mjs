@@ -6,6 +6,27 @@ test('room always has eight slots, humans replace bots and leave returns a bot',
 test('reconnect retains scores without duplicating a player',()=>{const m=new Match(),a=m.join('session-one','A');a.score=900;a.kills=6;assert.equal(m.join('session-one','A'),a);assert.equal(a.score,900);assert.equal(m.actors.length,8);});
 test('network inputs run the same movement simulation as solo',()=>{const m=new Match({mapId:'pine-ridge'}),a=m.join('one','A');m.actors=m.actors.filter(b=>!b.bot);Object.assign(a,createPlayer(-33,0));const predicted=createPlayer(-33,0);for(let n=0;n<180;n++){const i=input(n,{forward:1,jump:n>30&&n<140,crouch:n>100&&n<125});m.inputs(a.id,[i]);m.step();stepMovement(predicted,i,m.map.solids,STEP);}assert.ok(Math.abs(a.x-predicted.x)<1e-9);assert.ok(Math.abs(a.z-predicted.z)<1e-9);assert.ok(Math.abs(a.feet-predicted.feet)<1e-9);});
 test('server rejects repeated inputs and caps backlog instead of trusting client time',()=>{const m=new Match(),a=m.join('one','A');m.inputs(a.id,Array.from({length:16},(_,n)=>input(n,{forward:1})));m.inputs(a.id,Array.from({length:16},(_,n)=>input(n,{forward:1})));assert.equal(a.queue.length,16);m.step();assert.equal(a.ack,0);assert.equal(a.queue.length,15);assert.equal(validateInput({seq:0,yaw:NaN,pitch:0}),null);assert.equal(validateInput({seq:0,yaw:0,pitch:Infinity}),null);assert.equal(validateInput(input(1,{forward:999,side:-999})).forward,1);});
+test('short input gaps preserve movement and aim without replaying actions',()=>{
+ const match=new Match({botCount:0});
+ const actor=match.join('one','A');
+ match.inputs(actor.id,[input(0,{forward:1,aim:true,fire:true,fresh:true,reload:true})]);
+ assert.equal(match.playerInput(actor).fire,true);
+ const held=match.playerInput(actor);
+ assert.equal(held.forward,1);
+ assert.equal(held.aim,true);
+ assert.equal(held.fire,false);
+ assert.equal(held.fresh,false);
+ assert.equal(held.reload,false);
+ for(let i=0;i<6;i++)match.playerInput(actor);
+ assert.equal(match.playerInput(actor).forward,undefined);
+ assert.equal(actor.ack,0);
+
+ match.inputs(actor.id,[input(1,{forward:1}),input(2,{forward:1})]);
+ match.playerInput(actor);
+ match.disconnect(actor.id);
+ assert.equal(match.playerInput(actor).forward,undefined);
+ assert.equal(match.join(actor.id,'A').ack,2);
+});
 test('server confirms damage, cover, shield, fire cadence and score',()=>{const m=new Match({mapId:'switchyard'},()=>.5),a=m.join('one','A'),b=m.join('two','B');m.actors=[a,b];Object.assign(a,createPlayer(-13,13),{shield:0});Object.assign(b,createPlayer(-13,1),{shield:0});a.yaw=0;a.pitch=0;m.shoot(a,true);assert.ok(b.hp<100);const hp=b.hp;m.shoot(a,true);assert.equal(b.hp,hp);for(let n=0;n<80;n++){m.inputs(a.id,[input(n,{fire:true,fresh:n===0})]);m.step();}assert.ok(a.kills>=1);assert.ok(a.score>=100);assert.ok(m.events.some(e=>e.type==='kill'&&e.by===a.id));});
 test('pistol cannot fire continuously without fresh triggers',()=>{const m=new Match(),a=m.join('one','A');m.actors=[a];for(let n=0;n<120;n++){m.inputs(a.id,[input(n,{weapon:6,fire:true,fresh:false})]);m.step();}assert.equal(a.arsenal.mags[6],12);});
 test('round results open voting and auto-start the winning map with the same players',()=>{const m=new Match({public:true}),a=m.join('one','A'),b=m.join('two','B');a.score=500;m.remaining=STEP/2;m.step();assert.equal(m.phase,'results');assert.equal(m.voteRemaining,VOTE_SECONDS);assert.equal(m.restart(b.id,m.round),false);assert.equal(m.restart(a.id,m.round),false);assert.ok(m.vote(a.id,'pine-ridge'));assert.ok(m.vote(b.id,'pine-ridge'));for(let n=0;n<Math.ceil(VOTE_SECONDS/STEP)+1;n++)m.step();assert.equal(m.phase,'playing');assert.equal(m.round,2);assert.equal(m.map.id,'pine-ridge');assert.equal(m.actors.find(x=>x.id==='one'),a);assert.equal(m.actors.find(x=>x.id==='two'),b);assert.equal(a.score,0);assert.equal(m.actors.length,8);assert.ok(m.actors.every(a=>Math.abs(a.x)<42&&Math.abs(a.z)<42));});

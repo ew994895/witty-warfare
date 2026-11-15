@@ -1,8 +1,8 @@
 import {ArenaObjectives} from './objectives.js';
 import {MAPS,createMap,getMap} from '../dist/maps.js';
-import {STEP,WEAPONS,createPlayer,createArsenal,stepMovement,createNav,trace,meleeTrace,clamp,damp,switchWeapon,tickArsenal,startReload,fireRound} from '../dist/core.js';
+import {STEP,WEAPONS,createPlayer,createArsenal,stepMovement,createNav,overlap,trace,meleeTrace,clamp,damp,switchWeapon,tickArsenal,startReload,fireRound} from '../dist/core.js';
 import {VOTE_SECONDS,nextArena} from '../dist/rounds.js';
-import {BOT_SKILLS,GUN_ORDER,MAX_PLAYERS,STORM_LIVES,TEAMS,humanLimit,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormRadius,teamWinner} from '../dist/rules.js';
+import {BOT_SKILLS,GUN_ORDER,MAX_PLAYERS,STORM_GRACE_SECONDS,STORM_LIVES,TEAMS,comparePlacements,humanLimit,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormDistance,stormRadius,teamWinner} from '../dist/rules.js';
 export {VOTE_SECONDS};
 export const CAPACITY=MAX_PLAYERS;
 export const poseKeys=['x','z','feet','vx','vz','vy','yaw','pitch','grounded','crouch','slide','slideReady','eye','hp','dead','shield','kills','deaths','score'];
@@ -11,6 +11,7 @@ export function validateInput(v){if(!v||!Number.isSafeInteger(v.seq)||v.seq<0||!
 export function applyInput(a,i,solids){a.yaw=i.yaw;a.pitch=i.pitch;switchWeapon(a.arsenal,i.weapon);tickArsenal(a.arsenal,STEP);if(i.reload)startReload(a.arsenal);stepMovement(a,{...i,mobility:WEAPONS[a.arsenal.index].mobility,aim:i.aim&&!a.arsenal.reloading&&!a.arsenal.switching&&a.arsenal.index!==7},solids,STEP);}
 const direction=(yaw,pitch)=>({x:-Math.sin(yaw)*Math.cos(pitch),y:Math.sin(pitch),z:-Math.cos(yaw)*Math.cos(pitch)});
 const eye=a=>({x:a.x,y:a.feet+a.eye,z:a.z});
+const INPUT_GRACE=.05;
 export class Match{
  constructor(config={},random=Math.random){
    this.random=random;
@@ -103,8 +104,7 @@ export class Match{
    const humans=this.humans();
    let actor=humans.find(a=>a.id===id);
    if(actor){
-     actor.queue=[];
-     actor.inputAge=0;
+     this.clearInput(actor);
      if(this.ranked&&actor.inactive){
        actor.inactive=actor.abandoned=false;
        this.respawn(actor);
@@ -121,7 +121,7 @@ export class Match{
    actor.roundStartInput=actor.received;
    actor.team=null;
    this.prepareModeActor(actor);
-   const lateStorm=this.settings.rules==='storm'&&this.phase==='playing'&&this.duration-this.remaining>=15;
+   const lateStorm=this.settings.rules==='storm'&&this.phase==='playing'&&this.duration-this.remaining>=STORM_GRACE_SECONDS;
    if(lateStorm){
      actor.waitingForRound=true;
      actor.inactive=true;
@@ -153,12 +153,12 @@ export class Match{
    this.actors.splice(index,1);
    this.votes.delete(id);
    if(this.host===id)this.host=this.humans()[0]?.id||null;
-   if(this.phase==='playing'&&(this.settings.rules!=='storm'||this.duration-this.remaining<15))this.fillBots();
+   if(this.phase==='playing'&&(this.settings.rules!=='storm'||this.duration-this.remaining<STORM_GRACE_SECONDS))this.fillBots();
  }
  disconnect(id){
    const actor=this.actors.find(a=>a.id===id);
    if(!actor)return;
-   actor.queue=[];
+   this.clearInput(actor);
    this.objectives?.release(actor);
    if(this.ranked&&this.phase==='playing'){
      actor.inactive=true;
@@ -226,9 +226,10 @@ export class Match{
    actor.arsenal.switching=.22;
  }
  stormTick(){
-   const radius=stormRadius(this.map,this.duration-this.remaining,this.duration);
+   const elapsed=this.duration-this.remaining;
+   const radius=stormRadius(this.map,elapsed,this.duration);
    for(const actor of this.actors){
-     if(actor.inactive||actor.dead>0||Math.hypot(actor.x,actor.z)<=radius)continue;
+     if(elapsed<STORM_GRACE_SECONDS||actor.inactive||actor.dead>0||stormDistance(this.map,actor)<=radius)continue;
      actor.hp=Math.max(0,actor.hp-18*STEP);
      actor.lastHurt=this.time;
      if(actor.hp===0){
@@ -238,7 +239,7 @@ export class Match{
    }
    const alive=this.actors.filter(actor=>!actor.inactive);
    if(alive.length>=2)this.stormReady=true;
-   if(this.stormReady&&alive.length<=1&&this.duration-this.remaining>=15){
+   if(this.stormReady&&alive.length<=1&&this.duration-this.remaining>=STORM_GRACE_SECONDS){
      this.roundWinner=alive[0]?.id??null;
      this.finishRound();
    }
@@ -255,6 +256,28 @@ export class Match{
    }
  }
  inputs(id,frames){const a=this.actors.find(a=>a.id===id&&!a.bot);if(!a||this.phase!=='playing'||!Array.isArray(frames)||frames.length>16)return;for(const raw of frames){const i=validateInput(raw);if(!i||i.seq<=a.received||a.queue.length>=32)continue;a.received=i.seq;a.queue.push(i);}}
+ clearInput(actor){
+   actor.queue=[];
+   actor.ack=actor.received;
+   actor.lastInput=null;
+   actor.inputAge=0;
+   actor.arsenal.burstRemaining=0;
+ }
+ playerInput(actor){
+   const input=actor.queue.shift();
+   if(input){
+     actor.ack=input.seq;
+     actor.inputAge=0;
+     actor.lastInput=input;
+     return input;
+   }
+   actor.inputAge+=STEP;
+   if(actor.lastInput&&actor.inputAge<=INPUT_GRACE){
+     // Small gaps can hold continuous controls. Only real input can fire or reload.
+     return {...actor.lastInput,fire:false,fresh:false,reload:false};
+   }
+   return {yaw:actor.yaw,pitch:actor.pitch,weapon:actor.arsenal.index};
+ }
  spawnPoints(actor){
    if(this.settings.rules==='storm')return this.stormSpawns();
    if(this.settings.rules==='ctf'&&actor.team){
@@ -264,17 +287,22 @@ export class Match{
    }
    return this.map.spawns;
  }
- respawn(a){this.objectives?.release(a);const candidates=this.spawnPoints(a).map(p=>({p,r:Math.min(...this.actors.filter(b=>b!==a&&b.dead===0).map(b=>Math.hypot(b.x-p[0],b.z-p[1])+(opponents(a,b)?0:10)),100)+spawnTeamBias(p,a.team)})).sort((a,b)=>b.r-a.r);const p=candidates[0].p;const stats={kills:a.kills,deaths:a.deaths,score:a.score};Object.assign(a,createPlayer(...p),stats);a.yaw=Math.atan2(a.x,a.z);a.arsenal=createArsenal(a.nextPrimary??a.arsenal.primary);a.nextPrimary=a.arsenal.primary;if(a.stage!==undefined)this.equipStage(a);a.path=[];a.queue=[];a.lastHurt=this.time;a.life=++this.lifeSerial;a.botCool=1;a.botReact=.4;a.ack=a.received;a.recoil=a.bloom=a.ads=0;this.event({type:'spawn',id:a.id});}
+ respawn(a){this.objectives?.release(a);const candidates=this.spawnPoints(a).map(p=>({p,r:Math.min(...this.actors.filter(b=>b!==a&&b.dead===0).map(b=>Math.hypot(b.x-p[0],b.z-p[1])+(opponents(a,b)?0:10)),100)+spawnTeamBias(p,a.team)})).sort((a,b)=>b.r-a.r);const p=candidates[0].p;const stats={kills:a.kills,deaths:a.deaths,score:a.score};Object.assign(a,createPlayer(...p),stats);a.yaw=Math.atan2(a.x,a.z);a.arsenal=createArsenal(a.nextPrimary??a.arsenal.primary);a.nextPrimary=a.arsenal.primary;if(a.stage!==undefined)this.equipStage(a);a.path=[];a.stormPath=false;a.navTime=0;this.clearInput(a);a.lastHurt=this.time;a.life=++this.lifeSerial;a.botCool=1;a.botReact=.4;a.recoil=a.bloom=a.ads=0;this.event({type:'spawn',id:a.id});}
  stormSpawns(){
    const radius=stormRadius(this.map,this.duration-this.remaining,this.duration);
-   const safe=this.map.spawns.filter(p=>Math.hypot(...p)<=radius);
-   return safe.length?safe:[...this.map.spawns].sort((a,b)=>Math.hypot(...a)-Math.hypot(...b)).slice(0,3);
+   const safe=this.map.spawns.filter(([x,z])=>stormDistance(this.map,{x,z})<=radius-1.5);
+   if(safe.length)return safe;
+   const center=this.map.stormCenter;
+   return [[0,0],[-3,0],[3,0],[0,-3],[0,3],[-3,-3],[3,3]]
+     .map(([x,z])=>[center.x+x,center.z+z])
+     .filter(([x,z])=>!this.map.solids.some(solid=>overlap(x,z,solid,.55)));
  }
  visible(a,b){const o=eye(a),d={x:b.x-o.x,y:b.feet+b.eye-o.y,z:b.z-o.z},len=Math.hypot(d.x,d.y,d.z);for(const k of ['x','y','z'])d[k]/=len||1;return trace(o,d,this.map.solids,[],null,len).distance>=len-.01;}
  event(e){this.events.push({...e,n:++this.eventId});if(this.events.length>80)this.events.shift();}
  damage(target,amount,attacker,head){
    const enemy=opponents(attacker,target);
    if(target===attacker||this.phase!=='playing'||target.dead>0||target.shield>0||(!enemy&&!this.settings.friendlyFire))return false;
+   if(this.settings.rules==='storm'&&attacker.bot&&target.bot)amount*=.20;
    target.hp=Math.max(0,target.hp-amount);
    target.lastHurt=this.time;
    this.event({type:'hit',by:attacker.id,id:target.id,amount,head,friendly:!enemy});
@@ -319,22 +347,27 @@ export class Match{
  else for(let n=0;n<w.pellets;n++){const spread=w.hip*(1-(a.ads||0))+w.ads*(a.ads||0)+(w.mode==='auto'&&![1,2].includes(a.arsenal.index)?(a.bloom||0)*(a.arsenal.index===5?.013:.007)*(1-(a.ads||0)*.9):0),angle=w.pellets>1?n*2.399963:this.random()*Math.PI*2,radius=Math.sqrt(w.pellets>1?(n+.5)/w.pellets:this.random());const right={x:Math.cos(a.yaw),y:0,z:-Math.sin(a.yaw)},up={x:Math.sin(a.yaw)*Math.sin(a.pitch),y:Math.cos(a.pitch),z:Math.cos(a.yaw)*Math.sin(a.pitch)};let ray={};for(const k of ['x','y','z'])ray[k]=d[k]+right[k]*Math.cos(angle)*spread*radius+up[k]*Math.sin(angle)*spread*radius;const len=Math.hypot(ray.x,ray.y,ray.z);for(const k of ['x','y','z'])ray[k]/=len;const h=trace(o,ray,this.map.solids,targets,null);if(n===0||n%3===0)marks.push({x:o.x+ray.x*h.distance,y:o.y+ray.y*h.distance,z:o.z+ray.z*h.distance});if(h.actor){const amount=a.bot?(h.head?23:17):w.damage*(h.head?w.head:1)*clamp(1-(h.distance-w.fallStart)/w.fallLength,w.minDamage,1);connected=this.damage(h.actor.live||h.actor,amount,a,h.head)||connected;}}
  if(connected&&w.mode!=='melee')a.hits++;a.recoil=Math.min(.1,(a.recoil||0)+w.kick*(a.ads>.5?.65:1));a.bloom=Math.min(1,(a.bloom||0)+.2);this.event({type:'shot',by:a.id,weapon:a.arsenal.index,from:o,to:marks});if(a.stage!==stage&&this.phase==='playing')this.equipStage(a);}
  botInput(a){if(a.skill==='practice')return {yaw:a.yaw,pitch:0,weapon:a.arsenal.index};a.navTime-=STEP;
- if(this.settings.rules==='storm'&&Math.hypot(a.x,a.z)>stormRadius(this.map,this.duration-this.remaining,this.duration)-2){
-   const center={x:0,z:0};
-   if(!a.stormPath||a.navTime<=0){
-     a.path=this.nav.path(a,center);
-     a.navTime=.65;
+ if(this.settings.rules==='storm'){
+   const elapsed=this.duration-this.remaining;
+   const radius=stormRadius(this.map,elapsed+4,this.duration);
+   const distance=stormDistance(this.map,a);
+   if(distance>radius-(a.stormPath?3.5:1.5)){
+     const center=this.map.stormCenter;
+     if(!a.stormPath||a.navTime<=0){
+       a.path=this.nav.path(a,center);
+       a.navTime=.65;
+     }
+     a.stormPath=true;
+     while(a.path.length&&Math.hypot(a.path[0].x-a.x,a.path[0].z-a.z)<.7)a.path.shift();
+     const goal=a.path[0]||center;
+     return {yaw:Math.atan2(a.x-goal.x,a.z-goal.z),pitch:0,forward:1,weapon:a.arsenal.index};
    }
-   a.stormPath=true;
-   while(a.path.length&&Math.hypot(a.path[0].x-a.x,a.path[0].z-a.z)<.7)a.path.shift();
-   const goal=a.path[0]||center;
-   return {yaw:Math.atan2(a.x-goal.x,a.z-goal.z),pitch:0,forward:1,weapon:a.arsenal.index};
  }
  if(a.stormPath){a.stormPath=false;a.navTime=0;}
  const objective=this.objectives?.botGoal(a);
  const target=this.actors.filter(b=>opponents(a,b)&&b.dead===0)
    .sort((b,c)=>Math.hypot(b.x-a.x,b.z-a.z)-Math.hypot(c.x-a.x,c.z-a.z))[0];
- if(!target&&!objective)return null;
+ if(!target&&!objective)return {yaw:a.yaw,pitch:a.pitch,weapon:a.arsenal.index};
  const dx=(target?.x??a.x)-a.x,dz=(target?.z??a.z)-a.z,dist=Math.hypot(dx,dz);
  const sees=target&&dist<this.map.sight&&this.visible(a,target);
  let goal=objective??target;
@@ -361,7 +394,9 @@ export class Match{
    side=moving?Math.sin(yaw-moveYaw):0;
  }
  return {seq:0,yaw,pitch:target?Math.atan2(target.feet+target.eye-.25-(a.feet+a.eye),dist||1):0,
-   forward,side,jump:false,crouch:false,aim:Boolean(sees),fire:Boolean(sees&&(!melee||dist<1.8)&&a.botReact===0&&target.shield===0),
+   forward,side,jump:false,crouch:false,aim:Boolean(sees),
+   fire:Boolean(sees&&(!target.bot||this.settings.rules!=='storm'||this.duration-this.remaining>=STORM_GRACE_SECONDS)&&
+     (!melee||dist<1.8)&&a.botReact===0&&target.shield===0),
    fresh:true,weapon:a.arsenal.index,reload:a.arsenal.mags[a.arsenal.index]===0};
  }
  step(){if(this.phase==='results'){if(!this.public)return;this.voteRemaining=Math.max(0,this.voteRemaining-STEP);if(!this.voteRemaining)this.beginRound(this.chooseNextMap());return;}if(this.phase!=='playing')return;this.time+=STEP;
@@ -371,20 +406,18 @@ export class Match{
      this.overtimeStartedAt=this.time;
      return;
    }
-   if(this.settings.rules==='storm'){
-     const [first,second]=this.actors.filter(a=>!a.inactive).sort((a,b)=>b.lives-a.lives||b.kills-a.kills);
-     if(first&&(!second||first.lives!==second.lives||first.kills!==second.kills))this.roundWinner=first.id;
-   }
-   if(this.settings.rules==='gun'){
-     const [first,second]=[...this.actors].sort((a,b)=>b.stage-a.stage);
-     if(first&&(!second||first.stage!==second.stage))this.roundWinner=first.id;
+   const {rules,scoreLimit}=this.settings;
+   if(rules==='storm'||rules==='gun'){
+     const order=(a,b)=>comparePlacements(rules,scoreLimit,a,b);
+     const [first,second]=this.actors.filter(a=>!a.inactive).sort(order);
+     if(first&&(!second||order(first,second)<0))this.roundWinner=first.id;
    }
    this.finishRound();
    return;
  }if(this.settings.rules==='storm'){
    this.stormTick();
    if(this.phase==='results')return;
- }for(const a of this.actors){if(a.inactive)continue;a.shield=Math.max(0,a.shield-STEP);if(a.dead>0){if(!a.bot){const i=a.queue.shift();if(i)a.ack=i.seq;}a.dead=Math.max(0,a.dead-STEP);if(!a.dead)this.respawn(a);continue;}let input=a.bot?this.botInput(a):a.queue.shift();if(!input){a.inputAge+=STEP;input={seq:a.ack,yaw:a.yaw,pitch:a.pitch,weapon:a.arsenal.index};}else{a.inputAge=0;if(!a.bot)a.ack=input.seq;}a.lastInput=input;a.recoil=damp(a.recoil||0,0,12,STEP);a.bloom=damp(a.bloom||0,0,6,STEP);a.ads=damp(a.ads||0,input.aim?1:0,a.arsenal.index===1?15:22,STEP);applyInput(a,input,this.map.solids);if(a.bot){const speed=Math.hypot(a.vx,a.vz),cap=this.map.botSpeed*(a.skill==='hard'?1.4:1);if(speed>cap){a.vx*=cap/speed;a.vz*=cap/speed;}}a.botCool=Math.max(0,(a.botCool||0)-STEP);if((input.fire||a.arsenal.burstRemaining>0)&&(!a.bot||!a.botCool)){this.shoot(a,!!input.fresh);if(a.bot)a.botCool=a.skill==='hard'?.2:a.skill==='easy'?.5:.31;if(this.phase==='results')return;}if(a.arsenal.mags[a.arsenal.index]===0&&a.arsenal.cooldown===0)startReload(a.arsenal);if(a.hp<100&&this.time-a.lastHurt>4)a.hp=Math.min(100,a.hp+22*STEP);}
+ }for(const a of this.actors){if(a.inactive)continue;a.shield=Math.max(0,a.shield-STEP);if(a.dead>0){if(!a.bot){const i=a.queue.shift();if(i)a.ack=i.seq;}a.dead=Math.max(0,a.dead-STEP);if(!a.dead)this.respawn(a);continue;}const input=a.bot?this.botInput(a):this.playerInput(a);a.recoil=damp(a.recoil||0,0,12,STEP);a.bloom=damp(a.bloom||0,0,6,STEP);a.ads=damp(a.ads||0,input.aim?1:0,a.arsenal.index===1?15:22,STEP);applyInput(a,input,this.map.solids);if(a.bot){const speed=Math.hypot(a.vx,a.vz),cap=this.map.botSpeed*(a.skill==='hard'?1.4:1);if(speed>cap){a.vx*=cap/speed;a.vz*=cap/speed;}}a.botCool=Math.max(0,(a.botCool||0)-STEP);if((input.fire||a.arsenal.burstRemaining>0)&&(!a.bot||!a.botCool)){this.shoot(a,!!input.fresh);if(a.bot)a.botCool=a.skill==='hard'?.2:a.skill==='easy'?.5:.31;if(this.phase==='results')return;}if(a.arsenal.mags[a.arsenal.index]===0&&a.arsenal.cooldown===0)startReload(a.arsenal);if(a.hp<100&&this.time-a.lastHurt>4)a.hp=Math.min(100,a.hp+22*STEP);}
  this.objectives?.step();
  this.history.push({time:this.time,actors:this.actors.map(a=>({id:a.id,life:a.life,x:a.x,z:a.z,feet:a.feet,crouch:a.crouch}))});while(this.history.length>30)this.history.shift();}
  setLoadout(id,primary,respawnNow=false){const a=this.actors.find(a=>a.id===id&&!a.bot);if(!a||a.stage!==undefined||a.inactive||!Number.isInteger(primary)||primary<0||primary>=6)return false;a.nextPrimary=primary;if(respawnNow&&this.phase==='playing'&&a.dead===0){a.deaths++;a.streak=0;this.respawn(a);}return true;}

@@ -22,15 +22,21 @@ export function defaultScoreLimit(rules) {
 }
 export const GUN_ORDER = [0,3,4,5,2,1,6,7];
 export const STORM_LIVES = 3;
+export const STORM_GRACE_SECONDS = 15;
+export const STORM_FINAL_RADIUS = 8;
 
 export function gameRules(value) {
   return Object.hasOwn(GAME_RULES,value) ? value : 'ffa';
 }
 
 export function stormRadius(map, elapsed, duration) {
-  const start=Math.hypot(map.half,map.half)+1;
-  const progress=Math.max(0,Math.min(1,(elapsed-15)/(duration-15)));
-  return start+(6-start)*progress;
+  const start=map.stormStartRadius;
+  const progress=Math.max(0,Math.min(1,(elapsed-STORM_GRACE_SECONDS)/(duration-STORM_GRACE_SECONDS)));
+  return start+(STORM_FINAL_RADIUS-start)*progress;
+}
+
+export function stormDistance(map, position) {
+  return Math.hypot(position.x-map.stormCenter.x,position.z-map.stormCenter.z);
 }
 export const TEAMS = ['blue', 'red'];
 export const TEAM_NAMES = {blue: 'Blue', red: 'Red'};
@@ -71,6 +77,15 @@ export function opponents(a, b) {
 export function teamWinner(scores) {
   if (scores.blue === scores.red) return null;
   return scores.blue > scores.red ? 'blue' : 'red';
+}
+
+export function comparePlacements(rules, scoreLimit, a, b) {
+  if (rules === 'gun') return (b.stage ?? 0) - (a.stage ?? 0);
+  if (rules === 'storm') return Number(Boolean(a.waitingForRound)) - Number(Boolean(b.waitingForRound))
+    || (b.lives ?? 0) - (a.lives ?? 0) || b.kills - a.kills;
+  const objectives = isObjective(rules) ? (b.objectiveScore ?? 0) - (a.objectiveScore ?? 0) : 0;
+  const eliminations = scoreLimit || rules !== 'ffa' ? b.kills - a.kills : 0;
+  return objectives || eliminations || b.score - a.score;
 }
 
 export function spawnTeamBias(spawn, team) {
