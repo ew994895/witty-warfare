@@ -76,6 +76,8 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 #hubStatus{margin:7px 0;color:#e2c78d;font-size:12px}
 #hubStatus:empty{display:none}
 .hub-intro,.hub-key p,.hub-empty{font-size:13px;color:#b6c8af;line-height:1.5}
+.hub-google { margin: 12px 0 16px; }
+#hubGoogleHelp { margin: 8px 0; font-size: 11px; }
 .hub-form{display:grid;gap:8px;align-items:end;margin:10px 0}
 .hub-inline{grid-template-columns:1fr auto}
 .hub-form label{min-width:0;display:grid;gap:4px;color:#c5d6bd;font-size:12px}

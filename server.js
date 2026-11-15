@@ -4,7 +4,7 @@ import {gameRules,roomSettings,teamWinner} from './dist/rules.js';
 import {playerHub} from './server/player-hub.js';
 import {roundRecord} from './server/round-record.js';
 export {PlayerHub} from './server/player-hub.js';
-const accountPaths=new Set(['create','sign-in','sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result']);
+const accountPaths=new Set(['create','sign-in','sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result','sign-in-options','google-challenge','google-sign-in','google-enroll']);
 
 async function accountRequest(request, env, path, origin){
   const headers=new Headers();
@@ -13,7 +13,7 @@ async function accountRequest(request, env, path, origin){
   headers.set('X-Witty-Rate-Source',request.headers.get('CF-Connecting-IP')||'local');
   let body;
   if(request.method==='POST'||request.method==='PATCH'){
-    const max=2048;
+    const max=path==='google-sign-in'?8192:2048;
     if(Number(request.headers.get('Content-Length'))>max)return json({error:'Request too large'},413,origin);
     const reader=request.body?.getReader();
     const buffer=new Uint8Array(max);
@@ -69,7 +69,10 @@ async function playerId(roomId, session){
   const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',input),0,16);
   return Array.from(digest,byte=>byte.toString(16).padStart(2,'0')).join('');
 }
-const allowedOrigin=(req,env)=>{const origin=req.headers.get('Origin');return !origin||origin===new URL(req.url).origin||origin==='https://witty-warfare.pages.dev';};
+const allowedOrigin=(req,env)=>{
+  const origin=req.headers.get('Origin');
+  return !origin||origin===new URL(req.url).origin||origin==='https://witty-warfare.pages.dev'||origin===env.WITTY_WEB_ORIGIN;
+};
 const json=(data,status=200,origin='')=>Response.json(data,{status,headers:{'Access-Control-Allow-Origin':origin,'Vary':'Origin','Cache-Control':'no-store'}});
 export default {async fetch(req,env){const url=new URL(req.url);if(!url.pathname.startsWith('/api/'))return env.ASSETS.fetch(req);const origin=req.headers.get('Origin')||'';if(!allowedOrigin(req,env))return json({error:'Origin not allowed'},403);if(req.method==='OPTIONS')return new Response(null,{headers:{'Access-Control-Allow-Origin':origin,'Access-Control-Allow-Methods':'GET, POST, PATCH, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization','Vary':'Origin'}});
  const accountPath=url.pathname.match(/^\/api\/account\/([a-z-]+)$/)?.[1];

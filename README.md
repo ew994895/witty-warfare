@@ -78,6 +78,10 @@ To exercise the complete two-player loop on a running server, use `node tests/ro
 
 Guest play is available in every mode. Open **Player Hub** to create an account with a unique @handle and an editable callsign. Save the generated sign-in key somewhere private. It signs you in on another device and there is no email reset. The server stores a hash of the key and issues a 30-day session per sign-in. Online rooms use short-lived, single-use play tickets.
 
+Set the Worker's `GOOGLE_CLIENT_ID` variable to a Google Auth Platform **Web application** client ID to enable **Sign in with Google**. Register the exact game URL origin under **Authorized JavaScript origins**. Use a separate test client with `http://localhost:8787` for local development. The Google button uses the popup flow and only needs the public client ID. Google's production brand review requires ownership verification for the authorized domains.
+
+With Google enabled, new players sign in and choose their game handle and callsign once. Existing players sign in with their key, then link Google from their profile. Linking preserves the handle, stats, ranks, and friends. Linked profiles use Google for later sign-ins. The game verifies Google's signed credential and stores its stable account ID. The profile does not use or display the player's Google email or name. Guest play continues with the existing access to game modes.
+
 Signed-in players who participate for at least 15 seconds and stay through the end of a round get lifetime stats. Public Online and Custom Rooms have separate totals for matches, wins, eliminations, deaths, accuracy, headshot eliminations, best streak, and best score. Six milestone awards come from those totals. Offline practice keeps its local records. The public top 25 orders players by human eliminations from completed Public Online rounds, then public wins.
 
 Add friends by their exact @handle. Accept, decline, cancel, or remove connections in **Friends**. In a Custom Room, use **Invite a Friend** from the pause or results screen to send an invite to an accepted friend. They can join from their Friends inbox. Invites expire after 20 minutes.

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
+import {generateKeyPair, SignJWT} from 'jose';
 import {Match} from '../server/match.js';
 import {PlayerHub} from '../server/player-hub.js';
+import {verifyGoogleCredential} from '../server/google-sign-in.js';
 import {roundRecord} from '../server/round-record.js';
 
 function hubFixture() {
@@ -20,12 +22,77 @@ function hubFixture() {
     },
     transactionSync(callback){
       db.exec('BEGIN');
-      try{callback();db.exec('COMMIT');}
+      try{const result=callback();db.exec('COMMIT');return result;}
       catch(error){db.exec('ROLLBACK');throw error;}
     }
   }});
   return {db,hub};
 }
+
+test('Google login creates profiles and links existing accounts without allowing swaps or replay',async()=>{
+  const {db,hub}=hubFixture();
+  const clientId='test-client.apps.googleusercontent.com';
+  const {privateKey,publicKey}=await generateKeyPair('RS256');
+  const call=async(path,body,session)=>{
+    const response=await hub.fetch(new Request('https://players/'+path, {
+      method:body?'POST':'GET',
+      body:body?JSON.stringify(body):undefined,
+      headers:session?{Authorization:'Bearer '+session}:{}
+    }));
+    return {status:response.status,...await response.json()};
+  };
+  const token=(nonce,sub,audience=clientId)=>new SignJWT({nonce})
+    .setProtectedHeader({alg:'RS256'}).setIssuer('https://accounts.google.com').setSubject(sub)
+    .setAudience(audience).setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  const signIn=async(subject,session)=>{
+    const {nonce}=await call('google-challenge',{},session);
+    return call('google-sign-in',{credential:await token(nonce,subject)},session);
+  };
+  try{
+    assert.equal((await call('sign-in-options')).googleClientId,null);
+    const legacyKey='a'.repeat(64);
+    const legacy=await call('create',{handle:'alfa',name:'Alfa',key:legacyKey});
+    const other=await call('create',{handle:'bravo',name:'Bravo',key:'b'.repeat(64)});
+    assert.equal(legacy.status,201);
+    db.prepare("INSERT INTO stats (handle,playlist,wins) VALUES ('alfa','public',7)").run();
+    db.prepare("INSERT INTO friendships VALUES ('alfa','bravo','alfa',1)").run();
+    hub.googleId=clientId;
+    hub.verifyGoogle=(credential,id)=>verifyGoogleCredential(credential,id,publicKey);
+    assert.equal((await call('sign-in-options')).googleClientId,clientId);
+    assert.equal((await call('create',{handle:'guest',name:'Guest',key:'c'.repeat(64)})).status,403);
+    assert.equal((await call('sign-in',{key:legacyKey})).profile.handle,'alfa');
+
+    const {nonce}=await call('google-challenge',{},legacy.session);
+    const credential=await token(nonce,'google-alfa');
+    assert.equal((await call('google-sign-in',{credential},other.session)).status,409);
+    const link=await call('google-sign-in',{credential},legacy.session);
+    assert.deepEqual(link.profile,{handle:'alfa',name:'Alfa',googleLinked:true});
+    assert.equal((await call('google-sign-in',{credential},legacy.session)).status,409);
+    assert.equal((await signIn('google-alfa',other.session)).status,409);
+    assert.equal((await signIn('google-other',legacy.session)).status,409);
+    assert.equal((await call('sign-in',{key:legacyKey})).status,401);
+    const returning=await signIn('google-alfa');
+    const saved=await call('profile',null,returning.session);
+    assert.equal(saved.stats[0].wins,7);
+    assert.equal(saved.friends[0].handle,'bravo');
+    assert.equal(typeof (await call('ticket',{},returning.session)).ticket,'string');
+
+    const challenge=await call('google-challenge',{});
+    const wrongApp=await token(challenge.nonce,'google-new','different.apps.googleusercontent.com');
+    assert.equal((await call('google-sign-in',{credential:wrongApp})).status,401);
+    const registration=await signIn('google-new');
+    assert.equal(registration.status,200,registration.error);
+    const {enrollment}=registration;
+    assert.match(enrollment,/^[a-f0-9]{64}$/);
+    const taken=await call('google-enroll',{enrollment,handle:'bravo',name:'Delta'});
+    assert.equal(taken.status,409,taken.error);
+    const newPlayer=await call('google-enroll',{enrollment,handle:'delta',name:'Delta'});
+    assert.equal(newPlayer.status,201);
+    assert.equal(newPlayer.profile.googleLinked,true);
+    assert.equal((await call('google-enroll',{enrollment,handle:'extra',name:'Extra'})).status,401);
+    assert.equal((await signIn('google-new')).profile.handle,'delta');
+  }finally{db.close();}
+});
 
 test('the account database records completed matches once and ranks only public human eliminations',async()=>{
   const {db,hub}=hubFixture();

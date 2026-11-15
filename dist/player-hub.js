@@ -14,12 +14,39 @@ function element(tag, text, className) {
   return el;
 }
 
+let googleScript;
+function loadGoogle() {
+  if(window.google?.accounts?.id)return Promise.resolve(window.google.accounts.id);
+  return googleScript ??= new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const fail=()=>{
+      clearTimeout(timer);
+      script.remove();
+      googleScript=null;
+      reject(new Error('The Google sign-in button could not load.'));
+    };
+    const timer=setTimeout(fail,8000);
+    script.src='https://accounts.google.com/gsi/client';
+    script.async=true;
+    script.onload=()=>{
+      if(!window.google?.accounts?.id){fail();return;}
+      clearTimeout(timer);
+      resolve(window.google.accounts.id);
+    };
+    script.onerror=fail;
+    document.head.append(script);
+  });
+}
+
 export function createPlayerHub(origin, onProfile, joinRoom) {
   let session = read('localStorage',SESSION);
   let current = null;
   let section = 'profile';
   let activeRoom = null;
   let inboxTimer;
+  let googleClientId;
+  let googleAttempt=0;
+  let enrollment=null;
   let pending;
   try{pending = JSON.parse(read('sessionStorage',PENDING));}catch{}
   const dialog = $('playerHub');
@@ -44,7 +71,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
 
   function setProfile(profile) {
     current = profile;
-    $('hubGuest').hidden = $('hubFriendsGuest').hidden = Boolean(profile);
+    $('hubFriendsGuest').hidden = Boolean(profile);
     $('hubMember').hidden = $('hubFriendsMember').hidden = !profile;
     $('openPlayerHub').textContent = profile ? '@' + profile.handle : 'PLAYER HUB';
     $('openPlayerHub').setAttribute('aria-label','Open Player Hub');
@@ -52,10 +79,83 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       $('hubPlayer').textContent = profile.name + ' · @' + profile.handle;
       $('hubRename').elements.name.value = profile.name;
     }
+    if(profile?.googleLinked && pending?.handle===profile.handle){
+      pending=null;
+      write('sessionStorage',PENDING,null);
+    }
     const showKey = Boolean(profile && pending?.handle === profile.handle);
     $('hubKey').hidden = !showKey;
     $('hubKeyValue').value = showKey ? pending.key : '';
+    renderSignInOptions();
     onProfile(profile);
+  }
+
+  function renderSignInOptions() {
+    $('hubGuest').hidden=Boolean(current || enrollment);
+    $('hubLegacyCreate').hidden=Boolean(googleClientId);
+    $('hubLegacySignIn').textContent=googleClientId?'Already have a sign-in key?':'Sign in with your key';
+    $('hubGoogle').hidden=!googleClientId||Boolean(current?.googleLinked||enrollment);
+    $('hubGoogleEnroll').hidden=!enrollment;
+    $('hubGoogleLinked').hidden=!current?.googleLinked;
+    $('hubGooglePrompt').textContent=current
+      ?'Link Google to keep your callsign, friends, stats, awards, and rank.'
+      :'Sign in to save your stats, add friends, and play Ranked.';
+  }
+
+  async function prepareGoogle() {
+    const attempt=++googleAttempt;
+    const active=()=>attempt===googleAttempt&&dialog.open&&section==='profile';
+    const target=$('hubGoogleButton');
+    target.replaceChildren();
+    $('hubRetryGoogle').hidden=true;
+    $('hubGoogleHelp').hidden=true;
+    try{
+      const options=await api('sign-in-options');
+      if(!active())return;
+      googleClientId=options.googleClientId;
+      renderSignInOptions();
+      if($('hubGoogle').hidden)return;
+      const activeSession=session;
+      const [google,{nonce}]=await Promise.all([loadGoogle(),api('google-challenge','POST')]);
+      if(!active()||session!==activeSession)return;
+      google.initialize({
+        client_id:googleClientId,
+        nonce,
+        use_fedcm_for_button:true,
+        callback:async ({credential})=>{
+          if(!active()||session!==activeSession)return;
+          target.replaceChildren();
+          status(current?'Linking Google…':'Signing in with Google…');
+          try{
+            const result=await api('google-sign-in','POST',{credential});
+            if(!active()||session!==activeSession)return;
+            if(result.enrollment){
+              enrollment=result.enrollment;
+              $('hubGoogleEnroll').elements.name.value=$('name').value;
+              renderSignInOptions();
+              $('hubGoogleEnroll').elements.handle.focus();
+            }else{
+              if(result.session)beginSession(result);
+              else setProfile(result.profile);
+              await refresh();
+            }
+            status(activeSession?'Google account linked.':'');
+          }catch(error){
+            if(!active())return;
+            status(error.message);
+            $('hubRetryGoogle').hidden=false;
+          }
+        }
+      });
+      google.renderButton(target,{theme:'outline',size:'large',text:current?'continue_with':'signin_with',shape:'rectangular'});
+      $('hubGoogleHelp').hidden=false;
+    }catch(error){
+      if(active()&&googleClientId){
+        status(error.message);
+        $('hubGoogleHelp').hidden=false;
+        $('hubRetryGoogle').hidden=false;
+      }
+    }
   }
 
   function endSession() {
@@ -181,6 +281,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
 
   async function select(tab) {
     section = tab;
+    googleAttempt++;
     status('');
     for(const button of dialog.querySelectorAll('[data-hub-tab]')){
       const selected = button.dataset.hubTab === tab;
@@ -203,7 +304,10 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
         list.replaceChildren(...ranks.map(row=>element('li',
           `${row.name} · @${row.handle} — ${competitive?row.rating+' rating':row.eliminations+' eliminations'} · ${row.wins} wins`)));
       }catch(error){if(section===tab)status(error.message);}
-    }else await refresh();
+    }else{
+      await refresh();
+      if(tab==='profile'&&section===tab)prepareGoogle();
+    }
   }
 
   function form(id, submit) {
@@ -239,7 +343,30 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     beginSession(await api('sign-in','POST',data));
     $('hubSignIn').reset();
     await refresh();
+    prepareGoogle();
   });
+  form('hubGoogleEnroll',async data=>{
+    try{
+      const result=await api('google-enroll','POST',{...data,enrollment});
+      enrollment=null;
+      beginSession(result);
+      $('hubGoogleEnroll').reset();
+      await refresh();
+    }catch(error){
+      if(error.status===401){
+        enrollment=null;
+        renderSignInOptions();
+        prepareGoogle();
+      }
+      throw error;
+    }
+  });
+  $('hubRetryGoogle').onclick=()=>{status('');prepareGoogle();};
+  $('hubCancelEnrollment').onclick=()=>{
+    enrollment=null;
+    renderSignInOptions();
+    prepareGoogle();
+  };
   form('hubRename',async data=>{
     const {profile} = await api('profile','PATCH',data);
     setProfile(profile);
@@ -267,6 +394,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       await api('sign-out','POST');
       endSession();
       status('Signed out. Guest play is available.');
+      prepareGoogle();
     }catch(error){
       if(error.status===401)endSession();
       status(error.message);
@@ -285,7 +413,10 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   $('openPlayerHub').onclick = () => open();
   $('rankingKind').onchange=()=>select('rankings');
   $('closePlayerHub').onclick = () => dialog.close();
-  dialog.addEventListener('close',()=>clearInterval(inboxTimer));
+  dialog.addEventListener('close',()=>{
+    googleAttempt++;
+    clearInterval(inboxTimer);
+  });
   for(const button of dialog.querySelectorAll('[data-hub-tab]'))button.onclick = () => select(button.dataset.hubTab);
   refresh();
 
