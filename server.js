@@ -1,10 +1,10 @@
 import {Match} from './server/match.js';
 import {QuickPlay} from './server/quick-play.js';
 import {gameRules,roomSettings,teamWinner} from './dist/rules.js';
-import {playerHub} from './server/player-hub.js';
+import {PLAYER_DATA_EPOCH,playerHub} from './server/player-hub.js';
 import {roundRecord} from './server/round-record.js';
 export {PlayerHub} from './server/player-hub.js';
-const accountPaths=new Set(['create','sign-in','sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result','sign-in-options','google-challenge','google-sign-in','google-enroll']);
+const accountPaths=new Set(['sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result','sign-in-options','google-challenge','google-sign-in','google-enroll']);
 
 async function accountRequest(request, env, path, origin){
   const headers=new Headers();
@@ -232,10 +232,11 @@ export class ArenaRoom{
   const match=this.match;
   if(match.phase!=='results'||this.reportedRound===match.round)return;
   this.reportedRound=match.round;
-  const report=match.ranked?{
-    id:this.config.rankedId,ranked:true,winner:teamWinner(match.teamScores),
+  const report={...roundRecord(match,match.ranked?this.config.rankedId:crypto.randomUUID()),epoch:PLAYER_DATA_EPOCH};
+  if(match.ranked)Object.assign(report,{
+    ranked:true,winner:teamWinner(match.teamScores),
     abandoned:match.humans().filter(actor=>actor.abandoned).map(actor=>actor.account)
-  }:roundRecord(match,crypto.randomUUID());
+  });
   if(!report.ranked&&!report.players.length)return;
   this.ctx.waitUntil(Promise.all([
     this.ctx.storage.put('report:'+report.id,report),

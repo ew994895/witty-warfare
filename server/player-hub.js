@@ -6,7 +6,8 @@ const HANDLE = /^[a-z0-9_]{3,16}$/;
 const KEY = /^[a-f0-9]{64}$/;
 const fields = 'handle, display_name AS name';
 
-export const playerHub = env => env.PLAYERS.get(env.PLAYERS.idFromName('players'));
+export const PLAYER_DATA_EPOCH = 2;
+export const playerHub = env => env.PLAYERS.get(env.PLAYERS.idFromName('players-v' + PLAYER_DATA_EPOCH));
 const reply = (value, status = 200) => Response.json(value, {status});
 const fail = (error, status) => reply({error}, status);
 const hex = bytes => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
@@ -25,7 +26,7 @@ export class PlayerHub {
     this.verifyGoogle = verifyGoogleCredential;
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS profiles (
-        handle TEXT PRIMARY KEY, display_name TEXT NOT NULL, key_hash TEXT UNIQUE NOT NULL
+        handle TEXT PRIMARY KEY, display_name TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS credentials (
         hash TEXT PRIMARY KEY, handle TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL,
@@ -37,7 +38,7 @@ export class PlayerHub {
         subject TEXT PRIMARY KEY, handle TEXT UNIQUE NOT NULL
       );
       CREATE TABLE IF NOT EXISTS google_attempts (
-        hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, session_hash TEXT, subject TEXT
+        hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, subject TEXT
       );
       CREATE INDEX IF NOT EXISTS google_attempt_expiry ON google_attempts(expires);
       CREATE TABLE IF NOT EXISTS auth_limits (
@@ -88,15 +89,15 @@ export class PlayerHub {
     return row ? {handle:row.handle, digest} : null;
   }
 
-  async limit(request, group = 'legacy', maximum = 15) {
+  async limit(request, group) {
     const source = request.headers.get('X-Witty-Rate-Source') || 'local';
-    const subject = await hash(group === 'legacy' ? source : group + ':' + source);
+    const subject = await hash(group + ':' + source);
     const bucket = Math.floor(Date.now() / WINDOW);
     this.sql.exec('DELETE FROM auth_limits WHERE bucket < ?', bucket - 1);
     const row = this.one(`INSERT INTO auth_limits VALUES (?, ?, 1)
       ON CONFLICT(subject) DO UPDATE SET attempts=CASE WHEN bucket=excluded.bucket THEN attempts+1 ELSE 1 END,
       bucket=excluded.bucket RETURNING attempts`, subject, bucket);
-    return row.attempts <= maximum;
+    return row.attempts <= 30;
   }
 
   profile(handle) {
@@ -105,38 +106,28 @@ export class PlayerHub {
     return profile;
   }
 
-  async makeGoogleAttempt(sessionHash = null, subject = null) {
+  async makeGoogleAttempt(subject = null) {
     const token = secret();
     const digest = await hash(token);
     const now = Date.now();
     this.sql.exec('DELETE FROM google_attempts WHERE expires<=?', now);
-    this.sql.exec('INSERT INTO google_attempts VALUES (?, ?, ?, ?)', digest, now + WINDOW, sessionHash, subject);
+    this.sql.exec('INSERT INTO google_attempts (hash, expires, subject) VALUES (?, ?, ?)', digest, now + WINDOW, subject);
     return token;
   }
 
   async googleSignIn(request) {
+    if (request.headers.has('Authorization')) return fail('Sign out before choosing another account.',409);
     const {credential} = await request.json();
     if (typeof credential !== 'string' || credential.length > 7600) return fail('Invalid Google sign-in.',400);
     let verified;
     try { verified = await this.verifyGoogle(credential, this.googleId); }
     catch { return fail('Google could not verify this sign-in. Please try again.',401); }
     const digest = await hash(verified.nonce);
-    const session = await this.authenticate(request);
-    if (request.headers.has('Authorization') && !session) return fail('Sign in to your player account again.',401);
-    const nonce = this.one(`DELETE FROM google_attempts WHERE hash=? AND expires>? AND subject IS NULL
-      AND session_hash IS ? RETURNING hash`,digest,Date.now(),session?.digest ?? null);
+    const nonce = this.one('DELETE FROM google_attempts WHERE hash=? AND expires>? AND subject IS NULL RETURNING hash',digest,Date.now());
     if (!nonce) return fail('This Google sign-in has expired. Please try again.',409);
     const linked = this.one('SELECT handle FROM google_accounts WHERE subject=?',verified.subject);
-    if (session) {
-      const current = this.one('SELECT subject FROM google_accounts WHERE handle=?',session.handle);
-      if ((linked && linked.handle !== session.handle) || (current && current.subject !== verified.subject)) {
-        return fail('That Google account and player profile cannot be linked because one already has a different link.',409);
-      }
-      if (!linked) this.sql.exec('INSERT INTO google_accounts VALUES (?, ?)',verified.subject,session.handle);
-      return reply({profile:this.profile(session.handle)});
-    }
     if (linked) return reply({session:await this.issue(linked.handle,'session',30*DAY),profile:this.profile(linked.handle)});
-    return reply({enrollment:await this.makeGoogleAttempt(null,verified.subject)});
+    return reply({enrollment:await this.makeGoogleAttempt(verified.subject)});
   }
 
   async googleEnroll(request) {
@@ -151,7 +142,7 @@ export class PlayerHub {
       if (!attempt) return 'expired';
       if (this.one('SELECT handle FROM google_accounts WHERE subject=?',attempt.subject)) return 'linked';
       if (this.profile(handle)) return 'taken';
-      this.sql.exec('INSERT INTO profiles VALUES (?, ?, ?)',handle,name,'google:'+secret());
+      this.sql.exec('INSERT INTO profiles (handle, display_name) VALUES (?, ?)',handle,name);
       this.sql.exec('INSERT INTO google_accounts VALUES (?, ?)',attempt.subject,handle);
       this.sql.exec('DELETE FROM google_attempts WHERE hash=?',digest);
       return 'created';
@@ -217,7 +208,7 @@ export class PlayerHub {
   }
 
   record(report) {
-    if (!['public','custom'].includes(report.playlist) || !Array.isArray(report.players) || report.players.length > 8) {
+    if (!['public','custom','ranked'].includes(report.playlist) || !Array.isArray(report.players) || report.players.length > 8) {
       return fail('Invalid match result.', 400);
     }
     this.storage.transactionSync(() => {
@@ -241,6 +232,12 @@ export class PlayerHub {
   async fetch(request) {
     const path = new URL(request.url).pathname;
     const method = request.method;
+    if ((path==='/internal/record'||path==='/internal/ranked-record')&&method==='POST'){
+      const report=await request.json();
+      if (report.epoch!==PLAYER_DATA_EPOCH) return reply({ok:true});
+      if (path==='/internal/ranked-record'&&!this.ranked.record(report)) return reply({ok:true});
+      return this.record(report);
+    }
     if (path.startsWith('/internal/ranked-') && method === 'POST') {
       const body=await request.json();
       if(path==='/internal/ranked-info'){
@@ -249,10 +246,8 @@ export class PlayerHub {
       }
       if(path==='/internal/ranked-start')return reply({ok:this.ranked.start(body.id)});
       if(path==='/internal/ranked-void'){this.ranked.void(body.id);return reply({ok:true});}
-      if(path==='/internal/ranked-record'){this.ranked.record(body);return reply({ok:true});}
     }
     if(path==='/ranked-ladder'&&method==='GET')return reply({ranks:this.ranked.ladder()});
-    if (path === '/internal/record' && method === 'POST') return this.record(await request.json());
     if (path === '/internal/redeem' && method === 'POST') {
       const {ticket} = await request.json();
       if (typeof ticket !== 'string' || !KEY.test(ticket)) return fail('Play ticket expired.', 401);
@@ -270,38 +265,11 @@ export class PlayerHub {
     if (path === '/sign-in-options' && method === 'GET') return reply({googleClientId:this.googleId});
     if (method === 'POST' && ['/google-challenge','/google-sign-in','/google-enroll'].includes(path)) {
       if (!this.googleId) return fail('Google sign-in is unavailable.',503);
-      if (!await this.limit(request,path,30)) return fail('Too many attempts. Try again in a few minutes.',429);
+      if (!await this.limit(request,path)) return fail('Too many attempts. Try again in a few minutes.',429);
       if (path === '/google-sign-in') return this.googleSignIn(request);
       if (path === '/google-enroll') return this.googleEnroll(request);
-      const session = await this.authenticate(request);
-      if (request.headers.has('Authorization') && !session) return fail('Sign in to your player account again.',401);
-      return reply({nonce:await this.makeGoogleAttempt(session?.digest)});
-    }
-
-    if (method === 'POST' && (path === '/create' || path === '/sign-in')) {
-      if (!await this.limit(request)) return fail('Too many attempts. Try again in a few minutes.', 429);
-      const body = await request.json();
-      if (path === '/sign-in') {
-        const key = typeof body.key === 'string' ? body.key.trim().toLowerCase() : '';
-        const keyHash = KEY.test(key) && await hash(key);
-        const row = keyHash && this.one('SELECT handle FROM profiles WHERE key_hash=?', keyHash);
-        if (!row) return fail('That sign-in key didn’t match an account.', 401);
-        if (this.one('SELECT 1 FROM google_accounts WHERE handle=?',row.handle)) {
-          return fail('This account now uses Sign in with Google.',401);
-        }
-        return reply({session:await this.issue(row.handle,'session',30*DAY),profile:this.profile(row.handle)});
-      }
-      if (this.googleId) return fail('Use Sign in with Google to create a player profile.',403);
-      const handle = handleOf(body.handle), name = nameOf(body.name);
-      if (!HANDLE.test(handle) || name.length < 2) return fail('Use a 3–16 character handle and a callsign of at least 2 characters.', 400);
-      const key = body.key;
-      if (typeof key !== 'string' || !KEY.test(key)) return fail('A valid sign-in key is required.',400);
-      const keyHash = await hash(key);
-      if (!this.one('INSERT OR IGNORE INTO profiles VALUES (?, ?, ?) RETURNING handle',handle,name,keyHash) &&
-          !this.one('SELECT 1 FROM profiles WHERE handle=? AND key_hash=?',handle,keyHash)) {
-        return fail('That handle is already taken.', 409);
-      }
-      return reply({session:await this.issue(handle,'session',30*DAY),profile:this.profile(handle)},201);
+      if (request.headers.has('Authorization')) return fail('Sign out before choosing another account.',409);
+      return reply({nonce:await this.makeGoogleAttempt()});
     }
 
     const session = await this.authenticate(request);

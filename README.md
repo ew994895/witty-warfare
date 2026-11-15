@@ -76,17 +76,15 @@ To exercise the complete two-player loop on a running server, use `node tests/ro
 
 ## Player Hub
 
-Guest play is available in every mode. Open **Player Hub** to create an account with a unique @handle and an editable callsign. Save the generated sign-in key somewhere private. It signs you in on another device and there is no email reset. The server stores a hash of the key and issues a 30-day session per sign-in. Online rooms use short-lived, single-use play tickets.
+Open **Sign In** to use Google, then choose a unique @handle and an editable callsign. Signing in on another device with the same Google account opens the same Player Hub profile. The game verifies Google's signed credential and associates its stable account ID with the game profile. Cloudflare holds the player profile and issues a 30-day session. Online rooms use short-lived, single-use play tickets. Quick Play, Vs AI, and Custom Rooms also offer guest play.
 
-Set the Worker's `GOOGLE_CLIENT_ID` variable to a Google Auth Platform **Web application** client ID to enable **Sign in with Google**. Register the exact game URL origin under **Authorized JavaScript origins**. Use a separate test client with `http://localhost:8787` for local development. The Google button uses the popup flow and only needs the public client ID. Google's production brand review requires ownership verification for the authorized domains.
+Set the Worker's `GOOGLE_CLIENT_ID` variable to a Google Auth Platform **Web application** client ID. Register the exact game URL origin under **Authorized JavaScript origins**. Use a separate test client with `http://localhost:8787` for local development. The Google button uses the popup flow and only needs the public client ID. Google's production brand review requires ownership verification for the authorized domains.
 
-With Google enabled, new players sign in and choose their game handle and callsign once. Existing players sign in with their key, then link Google from their profile. Linking preserves the handle, stats, ranks, and friends. Linked profiles use Google for later sign-ins. The game verifies Google's signed credential and stores its stable account ID. The profile does not use or display the player's Google email or name. Guest play continues with the existing access to game modes.
+Signed-in players who participate for at least 15 seconds and stay through the end of a round get lifetime online stats. Quick Play, Custom Rooms, and Ranked TDM each track matches, wins, eliminations, deaths, accuracy, headshot eliminations, best streak, and best score. The Profile tab shows the combined lifetime totals and per-mode breakdowns. Offline practice keeps its local records. The Quick Play leaderboard uses human eliminations from completed Quick Play rounds, followed by wins.
 
-Signed-in players who participate for at least 15 seconds and stay through the end of a round get lifetime stats. Public Online and Custom Rooms have separate totals for matches, wins, eliminations, deaths, accuracy, headshot eliminations, best streak, and best score. Six milestone awards come from those totals. Offline practice keeps its local records. The public top 25 orders players by human eliminations from completed Public Online rounds, then public wins.
+Add friends by their exact @handle. Accept, decline, cancel, or remove connections in **Friends**. In a Custom Room, use **Invite a Friend** from the pause or results screen to send an invite to an accepted friend. They can join from their Friends inbox. Invites expire after 20 minutes. The Player Hub button shows the count of incoming requests and room invites.
 
-Add friends by their exact @handle. Accept, decline, cancel, or remove connections in **Friends**. In a Custom Room, use **Invite a Friend** from the pause or results screen to send an invite to an accepted friend. They can join from their Friends inbox. Invites expire after 20 minutes.
-
-The SQLite-backed Player Hub is deployed as a separate Durable Object. The room server saves completed results to its outbox and retries delivery; match IDs prevent duplicate totals. Run `node tests/accounts.integration.mjs` against a local Worker for account, invite, and completed-match checks. Use Node 22.13 or newer for the SQLite regression fixture.
+The SQLite-backed Player Hub is deployed as a separate Durable Object. The room server saves completed results to its outbox and retries delivery; match IDs prevent duplicate totals. For account and ranked integration tests, start a fresh localhost Worker with `npx wrangler dev tests/google-auth-fixture.mjs --ip 127.0.0.1 --port 8787`. Run `node tests/accounts.integration.mjs` to check sign-in, friends, invites, and saving completed matches. Use Node 22.13 or newer for the SQLite regression fixture.
 
 ## Quick Play and Ranked
 
@@ -100,7 +98,7 @@ Five completed placement matches unlock a player's visible rating and eligibilit
 
 **Storm Survival** gives each player three lives. The shared storm wall and radar show the safe area, which starts shrinking after 15 seconds. The storm damages players outside the ring. Bots move to safety ahead of the wall and fight each other at a slower pace. Players who join after the grace period wait for the next round. The last survivor wins. At the time limit, remaining lives and then eliminations break ties.
 
-Custom Rooms can switch to Gun Game or Storm Survival in Host controls between matches. Run `node tests/ranked.integration.mjs` against a fresh local Worker to verify eight-player matchmaking, reserved reconnects, new playlists, and saved Ranked results.
+Custom Rooms can switch to Gun Game or Storm Survival in Host controls between matches. Run `node tests/ranked.integration.mjs` against the localhost account fixture above to verify eight-player matchmaking, reserved reconnects, new playlists, and saved Ranked results.
 
 
 ## Objective modes

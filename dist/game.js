@@ -3,7 +3,7 @@ import {RoomConnection,onlineOrigin} from './network.js?v=24';
 import {MAPS,getMap,createMap} from './maps.js?v=24';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,STORM_GRACE_SECONDS,TEAMS,TEAM_NAMES,TEAM_COLORS,comparePlacements,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormDistance,teamWinner} from './rules.js?v=24';
-import {createPlayerHub} from './player-hub.js?v=25';
+import {createPlayerHub} from './player-hub.js?v=26';
 import {createObjectiveDisplay} from './objectives-ui.js?v=24';
 import {assignGamepadBinding,CALIBRATION_STEPS,CONTROLLER_ACTIONS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=21';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
@@ -910,7 +910,7 @@ async function findRanked(){
  if(rankedSearch||online)return;
  if(!accountProfile){
    hub.open();
-   $('hubStatus').textContent='Create an account or sign in to queue for Ranked.';
+   $('hubStatus').textContent='Sign in with Google to queue for Ranked.';
    return;
  }
  const search={timer:null,request:null};

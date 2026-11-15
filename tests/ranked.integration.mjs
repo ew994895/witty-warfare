@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import WebSocket from 'ws';
+import {createFixturePlayer} from './google-auth-client.mjs';
 
 const origin=process.env.ROOM_TEST_ORIGIN||'http://127.0.0.1:8787';
 const clients=[];
@@ -48,9 +49,7 @@ try{
   assert.equal(storm.last.actors.find(actor=>actor.id===storm.id).lives,3);
   close(gun);
   close(storm);
-  const users=await Promise.all(Array.from({length:8},(_,i)=>api('create',{
-    handle:'rk_'+randomBytes(5).toString('hex'),name:'Ranked QA '+i,key:randomBytes(32).toString('hex')
-  },undefined,201)));
+  const users=await Promise.all(Array.from({length:8},(_,i)=>createFixturePlayer(api,'Ranked QA '+i)));
   const waiting=await Promise.all(users.slice(0,7).map(user=>api('ranked-queue',{action:'join'},user.session)));
   assert.ok(waiting.every(result=>result.queued&&!result.matchId));
   const eighth=await api('ranked-queue',{action:'join'},users[7].session);
@@ -74,6 +73,7 @@ try{
   assert.equal(resumed.last.actors.length,8);
   console.log('PASS: new public modes, signed-in Ranked queue, full 4v4 start, and reserved reconnect');
   if(!process.env.ROOM_TEST_SKIP_ROUND){
+    resumed.ws.send(JSON.stringify({type:'inputs',frames:[{seq:0,yaw:0,pitch:0,forward:1,weapon:0}]}));
     close(last);
     await until(()=>resumed.last.phase==='results','Ranked match reaches results',195000);
     assert.equal(resumed.last.voteRemaining,0);
@@ -84,6 +84,8 @@ try{
     assert.equal(quit.delta,-16);
     assert.equal(quit.played,1);
     assert.equal((await api('ranked-ladder')).ranks.length,0);
+    const stats=(await api('profile',null,users[0].session)).stats;
+    assert.equal(stats.find(row=>row.playlist==='ranked')?.matches,1);
     console.log('PASS: Ranked completion, no map vote, placement progress, and abandonment loss');
   }
 }finally{

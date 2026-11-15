@@ -10,7 +10,7 @@ export function roundRecord(match, id) {
     .filter(actor => actor.account && !actor.waitingForRound && match.time - actor.joinedAt >= 15 && actor.received > actor.roundStartInput)
     .map(actor => ({
       handle: actor.account,
-      won: isTeamGame(match.settings.rules) ? actor.team === winningTeam : match.settings.rules==='ffa' ? soloWinner === actor : actor.id===match.roundWinner,
+      won: !actor.abandoned&&(isTeamGame(rules) ? actor.team===winningTeam : rules==='ffa' ? soloWinner===actor : actor.id===match.roundWinner),
       kills: actor.kills,
       humanKills: actor.humanKills || 0,
       deaths: actor.deaths,
@@ -20,5 +20,5 @@ export function roundRecord(match, id) {
       bestStreak: actor.bestStreak,
       score: actor.score
     }));
-  return {id,playlist:match.public?'public':'custom',players};
+  return {id,playlist:match.ranked?'ranked':match.public?'public':'custom',players};
 }

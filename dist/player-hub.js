@@ -1,12 +1,9 @@
-const SESSION = 'witty-player-session';
-const PENDING = 'witty-pending-sign-in-key';
+const SESSION = 'witty-player-session-v2';
 const $ = id => document.getElementById(id);
 const read = (store,key) => {try{return window[store].getItem(key);}catch{return null;}};
 const write = (store,key,value) => {
   try{if(value)window[store].setItem(key,value);else window[store].removeItem(key);}catch{}
 };
-const randomKey = () => Array.from(crypto.getRandomValues(new Uint8Array(32)),
-  byte => byte.toString(16).padStart(2,'0')).join('');
 function element(tag, text, className) {
   const el = document.createElement(tag);
   el.textContent = text;
@@ -44,11 +41,11 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   let section = 'profile';
   let activeRoom = null;
   let inboxTimer;
-  let googleClientId;
   let googleAttempt=0;
   let enrollment=null;
-  let pending;
-  try{pending = JSON.parse(read('sessionStorage',PENDING));}catch{}
+  let friendRequests=0, roomInvites=0;
+  write('localStorage','witty-player-session',null);
+  write('sessionStorage','witty-pending-sign-in-key',null);
   const dialog = $('playerHub');
   const status = text => {$('hubStatus').textContent = text;};
 
@@ -73,36 +70,34 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     current = profile;
     $('hubFriendsGuest').hidden = Boolean(profile);
     $('hubMember').hidden = $('hubFriendsMember').hidden = !profile;
-    $('openPlayerHub').textContent = profile ? '@' + profile.handle : 'PLAYER HUB';
-    $('openPlayerHub').setAttribute('aria-label','Open Player Hub');
+    $('hubButtonLabel').textContent=profile?'@'+profile.handle:'SIGN IN';
     if(profile){
-      $('hubPlayer').textContent = profile.name + ' · @' + profile.handle;
-      $('hubRename').elements.name.value = profile.name;
+      $('hubPlayer').textContent=profile.name+' · @'+profile.handle;
+      $('hubRename').elements.name.value=profile.name;
+    }else{
+      friendRequests=roomInvites=0;
     }
-    if(profile?.googleLinked && pending?.handle===profile.handle){
-      pending=null;
-      write('sessionStorage',PENDING,null);
-    }
-    const showKey = Boolean(profile && pending?.handle === profile.handle);
-    $('hubKey').hidden = !showKey;
-    $('hubKeyValue').value = showKey ? pending.key : '';
+    renderInboxCount();
     renderSignInOptions();
     onProfile(profile);
   }
 
   function renderSignInOptions() {
-    $('hubGuest').hidden=Boolean(current || enrollment);
-    $('hubLegacyCreate').hidden=Boolean(googleClientId);
-    $('hubLegacySignIn').textContent=googleClientId?'Already have a sign-in key?':'Sign in with your key';
-    $('hubGoogle').hidden=!googleClientId||Boolean(current?.googleLinked||enrollment);
+    $('hubGoogle').hidden=Boolean(current||enrollment);
     $('hubGoogleEnroll').hidden=!enrollment;
-    $('hubGoogleLinked').hidden=!current?.googleLinked;
-    $('hubGooglePrompt').textContent=current
-      ?'Link Google to keep your callsign, friends, stats, awards, and rank.'
-      :'Sign in to save your stats, add friends, and play Ranked.';
+  }
+
+  function renderInboxCount() {
+    const count=friendRequests+roomInvites;
+    const badge=$('hubInboxCount');
+    badge.hidden=!current||count===0;
+    badge.textContent=count>99?'99+':String(count);
+    $('openPlayerHub').setAttribute('aria-label',!current?'Sign in to Player Hub':
+      count?`Open Player Hub, ${count} pending friend requests or room invites`:'Open Player Hub');
   }
 
   async function prepareGoogle() {
+    if(current||enrollment)return;
     const attempt=++googleAttempt;
     const active=()=>attempt===googleAttempt&&dialog.open&&section==='profile';
     const target=$('hubGoogleButton');
@@ -110,11 +105,9 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     $('hubRetryGoogle').hidden=true;
     $('hubGoogleHelp').hidden=true;
     try{
-      const options=await api('sign-in-options');
+      const {googleClientId}=await api('sign-in-options');
       if(!active())return;
-      googleClientId=options.googleClientId;
-      renderSignInOptions();
-      if($('hubGoogle').hidden)return;
+      if(!googleClientId)throw new Error('Google sign-in is temporarily unavailable.');
       const activeSession=session;
       const [google,{nonce}]=await Promise.all([loadGoogle(),api('google-challenge','POST')]);
       if(!active()||session!==activeSession)return;
@@ -125,7 +118,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
         callback:async ({credential})=>{
           if(!active()||session!==activeSession)return;
           target.replaceChildren();
-          status(current?'Linking Google…':'Signing in with Google…');
+          status('Signing in with Google…');
           try{
             const result=await api('google-sign-in','POST',{credential});
             if(!active()||session!==activeSession)return;
@@ -135,11 +128,10 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
               renderSignInOptions();
               $('hubGoogleEnroll').elements.handle.focus();
             }else{
-              if(result.session)beginSession(result);
-              else setProfile(result.profile);
+              beginSession(result);
               await refresh();
             }
-            status(activeSession?'Google account linked.':'');
+            status('');
           }catch(error){
             if(!active())return;
             status(error.message);
@@ -147,10 +139,10 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
           }
         }
       });
-      google.renderButton(target,{theme:'outline',size:'large',text:current?'continue_with':'signin_with',shape:'rectangular'});
+      google.renderButton(target,{theme:'outline',size:'large',text:'signin_with',shape:'rectangular'});
       $('hubGoogleHelp').hidden=false;
     }catch(error){
-      if(active()&&googleClientId){
+      if(active()){
         status(error.message);
         $('hubGoogleHelp').hidden=false;
         $('hubRetryGoogle').hidden=false;
@@ -165,12 +157,18 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   }
 
   function renderStats(rows) {
-    const stats = ['public','custom'].map(playlist => rows.find(row => row.playlist === playlist) || {});
-    $('hubStats').replaceChildren(...stats.map((row,i) => {
+    const stats = ['public','custom','ranked'].map(playlist => rows.find(row => row.playlist === playlist) || {});
+    const sum = key => stats.reduce((total,row) => total+(row[key]||0),0);
+    const lifetime = Object.fromEntries(
+      ['matches','wins','kills','deaths','shots','hits','headshots'].map(key=>[key,sum(key)])
+    );
+    for(const key of ['best_streak','best_score'])lifetime[key]=Math.max(0,...stats.map(row=>row[key]||0));
+    const cards=[['Lifetime online',lifetime],['Quick Play',stats[0]],['Custom Rooms',stats[1]],['Ranked',stats[2]]];
+    $('hubStats').replaceChildren(...cards.map(([label,row]) => {
       const card = element('article','','hub-stat');
       const accuracy = row.shots ? Math.round(row.hits/row.shots*100) : 0;
       card.append(
-        element('h4',i===0?'Public Online':'Custom Rooms'),
+        element('h4',label),
         element('p',`${row.matches || 0} matches · ${row.wins || 0} wins`),
         element('p',`${row.kills || 0} eliminations · ${row.deaths || 0} deaths`),
         element('p',`${accuracy}% accuracy · ${row.headshots || 0} headshots`),
@@ -178,7 +176,6 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       );
       return card;
     }));
-    const sum = key => stats.reduce((total,row) => total+(row[key]||0),0);
     const awards = [
       ['On the Board','Complete your first online match',sum('matches')>=1],
       ['First Elimination','Earn an online elimination',sum('kills')>=1],
@@ -196,6 +193,8 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   }
 
   function renderFriends(friends) {
+    friendRequests=friends.filter(friend=>friend.status==='received').length;
+    renderInboxCount();
     const list = $('hubFriendsList');
     if(!friends.length){
       list.replaceChildren(element('p','Add a friend by their exact @handle.','hub-empty'));
@@ -237,6 +236,8 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   }
 
   function renderInvites(invites) {
+    roomInvites=invites.length;
+    renderInboxCount();
     $('hubInvites').replaceChildren(...invites.map(invite=>{
       const row=element('div','','hub-person');
       const join=element('button','Join room','secondary');
@@ -332,19 +333,6 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     renderInvites([]);
   }
 
-  form('hubCreate',async data=>{
-    const handle = data.handle.trim().toLowerCase();
-    if(pending?.handle!==handle)pending = {handle,key:randomKey()};
-    write('sessionStorage',PENDING,JSON.stringify(pending));
-    beginSession(await api('create','POST',{...data,key:pending.key}));
-    await refresh();
-  });
-  form('hubSignIn',async data=>{
-    beginSession(await api('sign-in','POST',data));
-    $('hubSignIn').reset();
-    await refresh();
-    prepareGoogle();
-  });
   form('hubGoogleEnroll',async data=>{
     try{
       const result=await api('google-enroll','POST',{...data,enrollment});
@@ -379,16 +367,6 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     status('Friend request sent.');
   });
 
-  $('hubCopyKey').onclick = async () => {
-    try{await navigator.clipboard.writeText($('hubKeyValue').value);status('Sign-in key copied. Keep it private.');}
-    catch{$('hubKeyValue').select();status('Copy the selected key and keep it private.');}
-  };
-  $('hubSavedKey').onclick = () => {
-    pending = null;
-    write('sessionStorage',PENDING,null);
-    setProfile(current);
-    status('');
-  };
   $('hubSignOut').onclick = async () => {
     try{
       await api('sign-out','POST');
@@ -405,12 +383,12 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     for(const button of dialog.querySelectorAll('[data-hub-tab]')){
       button.hidden=Boolean(room)&&button.dataset.hubTab!=='friends';
     }
-    if(!room)$('hubCreate').elements.name.value ||= $('name').value;
     dialog.showModal();
     select(room?'friends':'profile');
     inboxTimer=setInterval(()=>{if(section==='friends'&&session)refresh();},10_000);
   }
   $('openPlayerHub').onclick = () => open();
+  $('hubContinueGuest').onclick=()=>dialog.close();
   $('rankingKind').onchange=()=>select('rankings');
   $('closePlayerHub').onclick = () => dialog.close();
   dialog.addEventListener('close',()=>{
@@ -418,7 +396,11 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     clearInterval(inboxTimer);
   });
   for(const button of dialog.querySelectorAll('[data-hub-tab]'))button.onclick = () => select(button.dataset.hubTab);
+  renderSignInOptions();
   refresh();
+  setInterval(()=>{
+    if(session&&!dialog.open&&!document.hidden&&!$('lobby').hidden)refresh();
+  },30_000);
 
   return {
     open,

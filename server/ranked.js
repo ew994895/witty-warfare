@@ -106,9 +106,9 @@ export class RankedLadder {
   }
 
   record(report){
-    this.storage.transactionSync(()=>{
+    return this.storage.transactionSync(()=>{
       const done=this.one("UPDATE ranked_matches SET state='done' WHERE id=? AND state='playing' RETURNING id",report.id);
-      if(!done)return;
+      if(!done)return Boolean(this.one("SELECT 1 FROM ranked_matches WHERE id=? AND state='done'",report.id));
       const seats=this.sql.exec('SELECT handle,team,rating FROM ranked_seats WHERE match_id=?',report.id).toArray();
       const average=team=>seats.filter(p=>p.team===team).reduce((sum,p)=>sum+p.rating,0)/4;
       const blue=average('blue'),red=average('red');
@@ -122,6 +122,7 @@ export class RankedLadder {
           seat.handle,rating,Number(result===1));
         this.sql.exec('INSERT INTO ranked_results VALUES (?,?,?,?,?)',report.id,seat.handle,rating-previous,rating,row.played);
       }
+      return true;
     });
   }
 

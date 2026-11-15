@@ -67,6 +67,9 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 
 .lobby-actions{display:flex;gap:8px;align-items:center}
 #openPlayerHub{color:var(--yellow);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#openPlayerHub{display:inline-flex;align-items:center;gap:5px}
+#hubButtonLabel{overflow:hidden;text-overflow:ellipsis}
+#hubInboxCount{flex:none;min-width:17px;padding:2px 4px;background:var(--yellow);color:var(--ink);border-radius:12px;text-align:center;letter-spacing:0}
 .player-hub{width:min(580px,calc(100vw - 24px));max-height:calc(100svh - 30px);overflow:auto;padding:22px;color:#e5efdc;background:#14221f;border:1px solid #81966f80;border-top:3px solid var(--yellow);border-radius:5px;color-scheme:dark}
 .player-hub::backdrop{background:#081612cc;backdrop-filter:blur(5px)}
 .hub-top{display:flex;align-items:center;justify-content:space-between}
@@ -75,16 +78,15 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .hub-tabs{grid-template-columns:repeat(3,1fr)}
 #hubStatus{margin:7px 0;color:#e2c78d;font-size:12px}
 #hubStatus:empty{display:none}
-.hub-intro,.hub-key p,.hub-empty{font-size:13px;color:#b6c8af;line-height:1.5}
+.hub-intro,.hub-empty{font-size:13px;color:#b6c8af;line-height:1.5}
 .hub-google { margin: 12px 0 16px; }
+#hubContinueGuest { margin-top: 10px; }
 #hubGoogleHelp { margin: 8px 0; font-size: 11px; }
 .hub-form{display:grid;gap:8px;align-items:end;margin:10px 0}
 .hub-inline{grid-template-columns:1fr auto}
 .hub-form label{min-width:0;display:grid;gap:4px;color:#c5d6bd;font-size:12px}
-.hub-form input,.hub-key input{width:100%;min-width:0;padding:8px 10px;background:#172a23;color:#e5efdc;border:1px solid #78936b80;border-radius:3px;font-size:14px}
+.hub-form input{width:100%;min-width:0;padding:8px 10px;background:#172a23;color:#e5efdc;border:1px solid #78936b80;border-radius:3px;font-size:14px}
 .hub-form .secondary,.player-hub .secondary{margin:0;padding:8px 11px}
-.hub-key{padding:10px;border:1px solid #b1bd69;background:#253424;margin:10px 0}
-.hub-key input{margin-bottom:8px;font:12px monospace}
 .hub-stats,.hub-awards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:8px 0 12px}
 .hub-stat,.hub-award,.hub-person{background:#1c3027;border:1px solid #78936b55;padding:8px 10px;border-radius:3px;font-size:12px}
 .hub-stat h4{margin:0 0 7px;color:var(--yellow);font-size:14px}

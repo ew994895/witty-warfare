@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {DatabaseSync} from 'node:sqlite';
 import {generateKeyPair, SignJWT} from 'jose';
 import {Match} from '../server/match.js';
-import {PlayerHub} from '../server/player-hub.js';
+import {PLAYER_DATA_EPOCH, PlayerHub, playerHub} from '../server/player-hub.js';
 import {verifyGoogleCredential} from '../server/google-sign-in.js';
 import {roundRecord} from '../server/round-record.js';
 
@@ -29,7 +29,7 @@ function hubFixture() {
   return {db,hub};
 }
 
-test('Google login creates profiles and links existing accounts without allowing swaps or replay',async()=>{
+test('Google is the only account flow and returning players keep their progress',async()=>{
   const {db,hub}=hubFixture();
   const clientId='test-client.apps.googleusercontent.com';
   const {privateKey,publicKey}=await generateKeyPair('RS256');
@@ -50,27 +50,20 @@ test('Google login creates profiles and links existing accounts without allowing
   };
   try{
     assert.equal((await call('sign-in-options')).googleClientId,null);
-    const legacyKey='a'.repeat(64);
-    const legacy=await call('create',{handle:'alfa',name:'Alfa',key:legacyKey});
-    const other=await call('create',{handle:'bravo',name:'Bravo',key:'b'.repeat(64)});
-    assert.equal(legacy.status,201);
-    db.prepare("INSERT INTO stats (handle,playlist,wins) VALUES ('alfa','public',7)").run();
-    db.prepare("INSERT INTO friendships VALUES ('alfa','bravo','alfa',1)").run();
     hub.googleId=clientId;
     hub.verifyGoogle=(credential,id)=>verifyGoogleCredential(credential,id,publicKey);
     assert.equal((await call('sign-in-options')).googleClientId,clientId);
-    assert.equal((await call('create',{handle:'guest',name:'Guest',key:'c'.repeat(64)})).status,403);
-    assert.equal((await call('sign-in',{key:legacyKey})).profile.handle,'alfa');
-
-    const {nonce}=await call('google-challenge',{},legacy.session);
-    const credential=await token(nonce,'google-alfa');
-    assert.equal((await call('google-sign-in',{credential},other.session)).status,409);
-    const link=await call('google-sign-in',{credential},legacy.session);
-    assert.deepEqual(link.profile,{handle:'alfa',name:'Alfa',googleLinked:true});
-    assert.equal((await call('google-sign-in',{credential},legacy.session)).status,409);
-    assert.equal((await signIn('google-alfa',other.session)).status,409);
-    assert.equal((await signIn('google-other',legacy.session)).status,409);
-    assert.equal((await call('sign-in',{key:legacyKey})).status,401);
+    assert.equal((await call('create',{handle:'guest',name:'Guest'})).status,401);
+    const firstChallenge=await call('google-challenge',{});
+    const firstCredential=await token(firstChallenge.nonce,'google-alfa');
+    const firstEnrollment=await call('google-sign-in',{credential:firstCredential});
+    assert.equal((await call('google-sign-in',{credential:firstCredential})).status,409);
+    const player=await call('google-enroll',{enrollment:firstEnrollment.enrollment,handle:'alfa',name:'Alfa'});
+    assert.deepEqual(player.profile,{handle:'alfa',name:'Alfa',googleLinked:true});
+    assert.equal((await call('google-sign-in',{credential:firstCredential},player.session)).status,409);
+    db.prepare("INSERT INTO profiles VALUES ('bravo','Bravo')").run();
+    db.prepare("INSERT INTO stats (handle,playlist,wins) VALUES ('alfa','public',7)").run();
+    db.prepare("INSERT INTO friendships VALUES ('alfa','bravo','alfa',1)").run();
     const returning=await signIn('google-alfa');
     const saved=await call('profile',null,returning.session);
     assert.equal(saved.stats[0].wins,7);
@@ -94,6 +87,25 @@ test('Google login creates profiles and links existing accounts without allowing
   }finally{db.close();}
 });
 
+test('account reset uses a new store and discards reports from the retired store',async()=>{
+  const {db,hub}=hubFixture();
+  try{
+    const binding={idFromName:name=>name,get:id=>id};
+    assert.notEqual(playerHub({PLAYERS:binding}),'players');
+    db.prepare("INSERT INTO profiles VALUES ('alpha','Alpha')").run();
+    const old={
+      id:'outbox-v1',playlist:'public',players:[
+        {handle:'alpha',won:true,kills:5,humanKills:5,deaths:0,shots:5,hits:5,headshots:0,bestStreak:5,score:500}
+      ]
+    };
+    const send=body=>hub.fetch(new Request('https://players/internal/record',{method:'POST',body:JSON.stringify(body)}));
+    assert.equal((await send(old)).status,200);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM stats').get().count,0);
+    assert.equal((await send({...old,epoch:PLAYER_DATA_EPOCH})).status,200);
+    assert.equal(db.prepare('SELECT kills FROM stats').get().kills,5);
+  }finally{db.close();}
+});
+
 test('the account database records completed matches once and ranks only public human eliminations',async()=>{
   const {db,hub}=hubFixture();
   try{
@@ -101,7 +113,7 @@ test('the account database records completed matches once and ranks only public 
       handle,won:false,kills:0,humanKills:0,deaths:0,shots:0,hits:0,headshots:0,bestStreak:0,score:0,...overrides
     });
     for(const handle of ['alpha','bravo','charlie','delta']){
-      db.prepare('INSERT INTO profiles VALUES (?,?,?)').run(handle,handle.toUpperCase(),'fixture-'+handle);
+      db.prepare('INSERT INTO profiles VALUES (?,?)').run(handle,handle.toUpperCase());
     }
     const first={id:'round-one',playlist:'public',players:[
       sample('alpha',{humanKills:3,kills:4,bestStreak:2,score:400,won:true}),
@@ -151,11 +163,11 @@ test('team wins follow the team score and old round inputs do not create a new s
   assert.deepEqual(roundRecord(match,'two').players,[]);
 });
 
-test('five placements unlock rating, ranking is match-result based, and recording is idempotent',()=>{
+test('five placements unlock rating, and Ranked lifetime stats only record once',async()=>{
   const {db,hub}=hubFixture();
   try{
     const names=Array.from({length:8},(_,i)=>'ranked'+i);
-    for(const name of names)db.prepare('INSERT INTO profiles VALUES (?,?,?)').run(name,name,'fixture-'+name);
+    for(const name of names)db.prepare('INSERT INTO profiles VALUES (?,?)').run(name,name);
     let now=10_000;
     let winner;
     for(let game=1;game<=5;game++){
@@ -167,8 +179,19 @@ test('five placements unlock rating, ranking is match-result based, and recordin
       assert.equal(hub.ranked.info(id,'outsider',now),null);
       assert.ok(hub.ranked.start(id,now));
       winner=info.seats.find(seat=>seat.handle===names[0]).team;
-      hub.ranked.record({id,winner,abandoned:[]});
-      hub.ranked.record({id,winner,abandoned:[]});
+      const report={id,winner,abandoned:[],playlist:'ranked',players:[{
+        handle:names[0],won:true,kills:5,humanKills:5,deaths:2,shots:10,hits:5,headshots:1,bestStreak:3,score:500
+      }]};
+      const publish=epoch=>hub.fetch(new Request('https://players/internal/ranked-record',{
+        method:'POST',body:JSON.stringify({...report,epoch})
+      }));
+      assert.equal((await publish(PLAYER_DATA_EPOCH-1)).status,200);
+      assert.equal(hub.ranked.standing(names[0]).played,game-1);
+      assert.equal((await publish(PLAYER_DATA_EPOCH)).status,200);
+      assert.equal((await publish(PLAYER_DATA_EPOCH)).status,200);
+      const stats=db.prepare("SELECT matches,kills FROM stats WHERE handle=? AND playlist='ranked'").get(names[0]);
+      assert.equal(stats.matches,game);
+      assert.equal(stats.kills,5*game);
       assert.equal(hub.ranked.standing(names[0]).played,game);
       assert.equal(hub.ranked.result(id,names[0]).played,game);
       if(game<5)assert.equal(hub.ranked.standing(names[0]).rating,null);

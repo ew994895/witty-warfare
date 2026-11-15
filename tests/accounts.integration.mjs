@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import WebSocket from 'ws';
+import {createFixturePlayer,signInFixture} from './google-auth-client.mjs';
 
 const origin = process.env.ROOM_TEST_ORIGIN || 'http://127.0.0.1:8787';
 const sockets = [];
-const makeKey = () => randomBytes(32).toString('hex');
 
 async function request(path, {method = 'GET', body, session, status = 200} = {}) {
   const response = await fetch(origin + path, {
@@ -23,12 +23,9 @@ const api = (path, options) => request('/api/account/' + path,options);
 const post = (path,body,session,status) => api(path,{method:'POST',body,session,status});
 
 async function player(name) {
-  const handle = 'qa_' + randomBytes(5).toString('hex');
-  const key = makeKey();
-  const account = await post('create',{handle,name,key},undefined,201);
-  assert.deepEqual(account.profile,{handle,name});
-  assert.equal(account.key,undefined);
-  return {handle,key,session:account.session};
+  const account=await createFixturePlayer(post,name);
+  assert.deepEqual(account.profile,{handle:account.handle,name,googleLinked:true});
+  return account;
 }
 
 async function until(check, message, timeout = 8000) {
@@ -64,11 +61,11 @@ try {
   await api('profile',{status:401});
   await request('/api/account/internal/record',{method:'POST',body:{},status:404});
   const a=await player('Account QA A'),b=await player('Account QA B');
-  await post('create',{handle:a.handle,name:'Account QA A',key:makeKey()},undefined,409);
-  await post('sign-in',{key:makeKey()},undefined,401);
+  await post('create',{},undefined,404);
+  await post('sign-in',{},undefined,404);
   await post('sign-out',{},a.session);
   await api('profile',{session:a.session,status:401});
-  a.session=(await post('sign-in',{key:a.key})).session;
+  a.session=(await signInFixture(post,a.subject)).session;
   await api('profile',{method:'PATCH',session:a.session,body:{name:'Verified QA'}});
   await post('friends',{action:'request',handle:b.handle},a.session);
   await post('friends',{action:'accept',handle:b.handle},a.session,409);
