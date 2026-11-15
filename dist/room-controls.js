@@ -1,4 +1,4 @@
-import {DIFFICULTIES,GAME_RULES,OBJECTIVE_RULES,defaultScoreLimit,isObjective,isTeamGame,roomSettings,scoreLimits} from './rules.js?v=12';
+import {CTF_OVERTIME_SECONDS,DIFFICULTIES,GAME_RULES,OBJECTIVE_RULES,defaultScoreLimit,isObjective,isTeamGame,roomSettings,scoreLimits} from './rules.js?v=22';
 
 const skillLabels = {
   default: 'Use room difficulty',
@@ -36,6 +36,7 @@ export function createRoomControls(container) {
   field('difficulty', 'Bot difficulty', DIFFICULTIES.map(skill => [skill, skillLabels[skill]]));
   field('duration', 'Round length', [[120, '2 minutes'], [180, '3 minutes'], [300, '5 minutes']]);
   field('scoreLimit', 'Kills to win', [[0, 'Time limit only'], ...choices([10, 20, 30, 40, 50])]);
+  field('ctfOvertime', 'Flag overtime', [[0, 'Off'], [1, CTF_OVERTIME_SECONDS + ' seconds · next capture wins']]);
   field('teamSetup', 'Team setup', [['mixed', 'Mixed teams'], ['humans-vs-bots', 'Humans vs bots']]);
   field('friendlyFire', 'Friendly fire', [[0, 'Off'], [1, 'On']]);
   field('respawnTime', 'Respawn delay', [[1.25, '1.25 seconds'], [2.5, '2.5 seconds'], [4, '4 seconds']]);
@@ -59,6 +60,7 @@ export function createRoomControls(container) {
       difficulty: value('difficulty'),
       duration: +value('duration'),
       scoreLimit: fields.scoreLimit.dataset.rules===value('rules')?+value('scoreLimit'):defaultScoreLimit(value('rules')),
+      ctfOvertime: value('ctfOvertime') === '1',
       teamSetup: value('teamSetup'),
       friendlyFire: value('friendlyFire') === '1',
       respawnTime: +value('respawnTime'),
@@ -82,6 +84,8 @@ export function createRoomControls(container) {
     for (const key of ['rules', 'maxPlayers', 'botCount', 'difficulty', 'duration', 'scoreLimit', 'teamSetup', 'respawnTime']) {
       fields[key].value = settings[key];
     }
+    labels.ctfOvertime.hidden = settings.rules !== 'ctf';
+    fields.ctfOvertime.value = Number(settings.ctfOvertime === true);
     fields.friendlyFire.value = Number(settings.friendlyFire);
     const visibleBots = settings.botCount === -1 ? maxBots : settings.botCount;
     botDetails.hidden = visibleBots === 0;

@@ -167,3 +167,73 @@ test('bots prioritize objectives and the next map rebuilds objectives and contri
   assert.equal(host.objectiveScore,0);
   assert.deepEqual(match.teamScores,{blue:0,red:0});
 });
+
+test('enabled Flag overtime preserves the tied match and the next real capture wins',()=>{
+  const [match,blue]=duel('ctf',{ctfOvertime:true,scoreLimit:0});
+  const [blueFlag,redFlag]=match.objectives.flags;
+  match.teamScores={blue:1,red:1};
+  place(blue,redFlag.home);
+  match.objectives.step();
+  assert.equal(redFlag.carrier,blue.id);
+
+  match.remaining=STEP;
+  match.step();
+  const overtime=match.snapshot();
+  assert.equal(overtime.phase,'playing');
+  assert.equal(overtime.round,1);
+  assert.equal(overtime.overtime,true);
+  assert.equal(overtime.remaining,60);
+  assert.deepEqual(overtime.teamScores,{blue:1,red:1});
+  assert.equal(overtime.objective.flags[1].carrier,blue.id);
+
+  place(blue,blueFlag.home);
+  match.step();
+  assert.equal(match.phase,'results');
+  assert.deepEqual(match.teamScores,{blue:2,red:1});
+
+  assert.ok(match.restart(blue.id,match.round));
+  assert.equal(match.snapshot().overtime,false);
+  assert.equal(match.settings.ctfOvertime,true);
+});
+
+test('Flag overtime expires in a draw and cannot restart itself',()=>{
+  const [match]=duel('ctf',{ctfOvertime:true});
+  match.remaining=STEP;
+  match.step();
+  assert.equal(match.snapshot().overtime,true);
+  match.remaining=STEP;
+  match.step();
+  assert.equal(match.phase,'results');
+  assert.equal(match.remaining,0);
+  assert.deepEqual(match.teamScores,{blue:0,red:0});
+});
+
+test('only opted-in and tied Capture the Flag rounds reach overtime',()=>{
+  for(const [rules,options,scores] of [
+    ['ctf',{},{blue:0,red:0}],
+    ['ctf',{ctfOvertime:true},{blue:1,red:0}],
+    ['hardpoint',{ctfOvertime:true},{blue:0,red:0}]
+  ]){
+    const [match]=duel(rules,options);
+    match.teamScores=scores;
+    match.remaining=STEP;
+    match.step();
+    assert.equal(match.phase,'results');
+    assert.equal(match.snapshot().overtime,false);
+  }
+  assert.equal(roomSettings({rules:'ctf',ctfOvertime:'true'}).ctfOvertime,false);
+});
+
+test('a host can queue the Flag overtime option for the next round',()=>{
+  const [match,host,guest]=duel('ctf',{scoreLimit:1});
+  const settings={...match.settings,ctfOvertime:true};
+  assert.equal(match.queueSettings(guest.id,settings,match.round),false);
+  assert.equal(match.queueSettings(host.id,settings,match.round),true);
+  assert.equal(match.snapshot().settings.ctfOvertime,false);
+  assert.equal(match.snapshot().nextSettings.ctfOvertime,true);
+  match.addTeamScore(host.team,1);
+  assert.equal(match.phase,'results');
+  assert.equal(match.snapshot().overtime,false);
+  assert.equal(match.restart(host.id,match.round),true);
+  assert.equal(match.snapshot().settings.ctfOvertime,true);
+});
