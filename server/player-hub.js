@@ -1,4 +1,5 @@
 import {RankedLadder} from './ranked.js';
+import {Squads} from './squads.js';
 import {googleClientId, verifyGoogleCredential} from './google-sign-in.js';
 const DAY = 86_400_000;
 const WINDOW = 600_000;
@@ -68,6 +69,7 @@ export class PlayerHub {
   }
 
   get ranked(){return this.ladder??=new RankedLadder(this.storage);}
+  get squads(){return this.squadStore??=new Squads(this.storage);}
 
   one(query, ...args) { return this.sql.exec(query, ...args).toArray()[0]; }
 
@@ -232,6 +234,12 @@ export class PlayerHub {
   async fetch(request) {
     const path = new URL(request.url).pathname;
     const method = request.method;
+    if (path.startsWith('/internal/squad-')&&method==='POST'){
+      const {room,handle}=await request.json();
+      if(path==='/internal/squad-room')return reply({launch:this.squads.lookup(room,handle)});
+      if(path==='/internal/squad-start')return reply({ok:this.squads.start(room)});
+      if(path==='/internal/squad-stop'){this.squads.stop(room);return reply({ok:true});}
+    }
     if ((path==='/internal/record'||path==='/internal/ranked-record')&&method==='POST'){
       const report=await request.json();
       if (report.epoch!==PLAYER_DATA_EPOCH) return reply({ok:true});
@@ -275,6 +283,11 @@ export class PlayerHub {
     const session = await this.authenticate(request);
     if (!session) return fail('Sign in to use your player account.', 401);
     const {handle,digest} = session;
+    if(path==='/squad'&&method==='GET')return reply(this.squads.state(handle));
+    if(path==='/squad'&&method==='POST'){
+      const result=this.squads.change(handle,await request.json());
+      return result.error?fail(result.error,result.status):reply(result);
+    }
     if(path==='/ranked-queue'&&method==='POST')return reply(this.ranked.queue(handle,(await request.json()).action));
     if(path==='/ranked-result'&&method==='POST')return reply({result:this.ranked.result((await request.json()).id,handle)});
     if (path === '/ticket' && method === 'POST') {

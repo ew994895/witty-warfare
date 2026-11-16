@@ -1,6 +1,11 @@
-import app, {ArenaRoom, PlayerHub as RealPlayerHub} from '../server.js';
+import app, {ArenaRoom as RealArenaRoom, PlayerHub as RealPlayerHub} from '../server.js';
 
-export {ArenaRoom};
+export class ArenaRoom extends RealArenaRoom {
+  async startParty(){
+    await super.startParty();
+    if(this.env.SQUAD_TEST_SHORT_ROUND==='1'&&this.match.phase==='playing')this.match.remaining=5;
+  }
+}
 export class PlayerHub extends RealPlayerHub {
   constructor(ctx, env) {
     super(ctx, {...env,GOOGLE_CLIENT_ID:'local-test.apps.googleusercontent.com'});

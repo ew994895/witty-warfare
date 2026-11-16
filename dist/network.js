@@ -28,13 +28,14 @@ export class RoomConnection {
       return;
     }
     if (this.closed) return;
-    const path = this.settings.rankedId ? `/api/ranked/${this.settings.rankedId}/socket`
+    const path = this.settings.partyRoom ? `/api/party-play/${this.settings.partyRoom}`
+      : this.settings.rankedId ? `/api/ranked/${this.settings.rankedId}/socket`
       : this.code ? `/api/rooms/${this.code}/socket`
       : this.roomId ? `/api/quick-play/${this.roomId}` : '/api/quick-play';
     const url = new URL(path, onlineOrigin());
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     for (const [key, value] of Object.entries(this.settings)) {
-      if (key !== 'rankedId') url.searchParams.set(key, value);
+      if (key !== 'rankedId' && key !== 'partyRoom') url.searchParams.set(key, value);
     }
     if (ticket) url.searchParams.set('ticket', ticket);
 
@@ -78,6 +79,7 @@ export class RoomConnection {
       this.clearInputs();
       if (this.closed) return;
       if (event.code === 4004) this.fail('Ranked match cancelled. Queue again when ready.');
+      else if (event.code === 4005) this.fail('Squad launch cancelled. Ready up to try again.');
       else if (event.code === 4000) this.fail('This session is active in another tab.');
       else this.retry();
     };
@@ -89,6 +91,7 @@ export class RoomConnection {
     if (this.tries > 2) this.roomId = null;
     if (this.tries > 5 || (error && !this.joined)) {
       const message = this.joined ? 'Could not reconnect. Return to the lobby and join again.'
+        : this.settings.partyRoom ? 'Could not connect the squad. Ready up to try again.'
         : this.settings.rankedId ? 'Could not connect to the Ranked match. Queue again when ready.'
         : this.code ? 'Could not join this room. Check the code, connection, or available slots.'
         : 'Public matchmaking is unavailable. Try again in a moment.';

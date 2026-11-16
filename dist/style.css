@@ -75,7 +75,9 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
 .hub-top{display:flex;align-items:center;justify-content:space-between}
 .hub-top h2{font:700 44px/1 'Barlow Condensed',Impact,sans-serif;margin:2px 0}
 #closePlayerHub{font-size:23px;line-height:1}
-.hub-tabs{grid-template-columns:repeat(3,1fr)}
+.hub-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}
+.squad-lobby,.squad-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+.squad-lobby .secondary{margin:0;padding:8px 11px}
 #hubStatus{margin:7px 0;color:#e2c78d;font-size:12px}
 #hubStatus:empty{display:none}
 .hub-intro,.hub-empty{font-size:13px;color:#b6c8af;line-height:1.5}

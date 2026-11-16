@@ -1,6 +1,6 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Witty Warfare — A Witty Games Original</title><meta name="description" content="Witty Warfare by Witty Games and WiT Web Co. Drop into a fast voxel FPS arena. Fast movement, six primary weapons, a pistol, a knife, and three arenas: small, medium, and large."><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23dfff71'/%3E%3Ctext x='8' y='47' font-size='46' font-family='Arial' font-weight='bold'%3EW%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="style.css?v=26"></head><body>
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Witty Warfare — A Witty Games Original</title><meta name="description" content="Witty Warfare by Witty Games and WiT Web Co. Drop into a fast voxel FPS arena. Fast movement, six primary weapons, a pistol, a knife, and three arenas: small, medium, and large."><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23dfff71'/%3E%3Ctext x='8' y='47' font-size='46' font-family='Arial' font-weight='bold'%3EW%3C/text%3E%3C/svg%3E"><link rel="stylesheet" href="style.css?v=27"></head><body>
 <canvas tabindex="0" id="game" aria-label="3D arena game"></canvas><div class="vignette"></div>
-<div id="lobby" class="screen"><header><a class="brand" href="./"><span class="brand-icon">W</span> WITTY<span class="brand-light">WARFARE</span></a><span class="build">BROWSER ARENA <i></i> V.26</span><div class="lobby-actions"><button type="button" id="openSettings" class="icon-button">SETTINGS</button><button type="button" id="openPlayerHub" class="icon-button"><span id="hubButtonLabel">SIGN IN</span><span id="hubInboxCount" hidden aria-hidden="true"></span></button><button id="sound" class="icon-button" aria-label="Toggle sound" aria-pressed="true"><span class="sound-icon" aria-hidden="true"></span><span id="soundLabel">Sound on</span></button></div></header>
+<div id="lobby" class="screen"><header><a class="brand" href="./"><span class="brand-icon">W</span> WITTY<span class="brand-light">WARFARE</span></a><span class="build">BROWSER ARENA <i></i> V.27</span><div class="lobby-actions"><button type="button" id="openSettings" class="icon-button">SETTINGS</button><button type="button" id="openPlayerHub" class="icon-button"><span id="hubButtonLabel">SIGN IN</span><span id="hubInboxCount" hidden aria-hidden="true"></span></button><button id="sound" class="icon-button" aria-label="Toggle sound" aria-pressed="true"><span class="sound-icon" aria-hidden="true"></span><span id="soundLabel">Sound on</span></button></div></header>
 <main><section class="hero"><div class="eyebrow"><span></span> A WITTY GAMES ORIGINAL</div><h1>WITTY<br><em>WARFARE.</em></h1><p>Quick wit. Quicker shots.<br>Slide. Chain your hops. Hit your shots.</p><div class="publisher">Witty Games <span>by WiT Web Co.</span></div><div class="hero-meta"><span id="heroMapSize" hidden>MEDIUM</span><span id="heroMapBadge" hidden><b id="heroMapName">DUST COURT</b></span><span id="heroMode">PUBLIC <b>FREE FOR ALL</b></span></div>
 </section>
 <aside class="match-panel"><div class="panel-top"><span class="section-label">PLAY</span><span class="pill" id="modePill">8 SLOTS</span></div>
@@ -24,6 +24,10 @@
 <div class="join-room"><label class="field-label" for="roomCode">JOIN A FRIEND</label><div class="join-row"><input id="roomCode" maxlength="8" placeholder="ROOM CODE" aria-label="Room code" autocomplete="off"><button id="joinRoom" class="secondary">JOIN</button></div></div>
 </div>
 <p id="roomError" role="status" aria-live="polite"></p>
+<div id="squadLobby" class="squad-lobby" hidden>
+ <button type="button" id="openSquad" class="secondary">SQUAD</button>
+ <button type="button" id="cancelSquadLaunch" class="secondary" hidden>CANCEL SQUAD MATCH</button>
+</div>
 <details id="playerSetup" class="room-options"><summary>Player &amp; loadout <span id="primarySummary">Ranger</span></summary><label class="field-label" for="name">CALLSIGN</label><input id="name" maxlength="16" value="Rookie" autocomplete="off" aria-label="Your callsign"><div id="lobbyLoadout"><div class="loadout-heading"><span class="field-label">CHOOSE YOUR PRIMARY</span><span id="weaponType">ALL-ROUNDER</span></div><div class="weapons"><button data-weapon="0" class="weapon selected"><svg viewBox="0 0 100 35"><path d="M8 13h16l5-6h36v5h27v5H62l-7 6H39l-3 10H25l3-14H8zM45 22h11l4 11H49z"/></svg><b>RANGER</b><span>ASSAULT RIFLE</span></button><button data-weapon="1" class="weapon"><svg viewBox="0 0 100 35"><path d="M8 13h14l7-6h30v5h36v4H53l-5 6H32l-3 10H19l4-14H8zM40 2h23v5H40z"/></svg><b>LONGSHOT</b><span>SNIPER RIFLE</span></button><button data-weapon="2" class="weapon"><svg viewBox="0 0 100 35"><path d="M13 13h12l4-6h28v5h30v7H55l-8 6H33l-4 8H18l5-15H13zM44 21h20v6H44z"/></svg><b>BREACHER</b><span>SHOTGUN</span></button><button data-weapon="3" class="weapon"><svg viewBox="0 0 100 35"><path d="M13 12h15l5-5h32v6h18v5H61l-6 6H39l-2 10H27l3-15H13zM43 23h9v12h-9z"/></svg><b>VIPER</b><span>SUBMACHINE GUN</span></button><button data-weapon="4" class="weapon"><svg viewBox="0 0 100 35"><path d="M8 13h18l6-6h36v5h24v5H68l-7 6H42l-4 11H28l3-15H8zM46 22h12l3 11H49zM44 2h14v5H44z"/></svg><b>RELAY</b><span>BURST RIFLE</span></button><button data-weapon="5" class="weapon"><svg viewBox="0 0 100 35"><path d="M5 12h20l4-6h42v5h24v7H68l-6 6H42l-4 10H26l4-16H5zM44 22h23v13H44zM42 1h21v4H42z"/></svg><b>TITAN</b><span>MACHINE GUN</span></button></div><p id="weaponDescription" class="weapon-description"></p><div class="included-kit"><span>EVERY LOADOUT</span><b>+ SIDEKICK PISTOL</b><b>+ EDGE KNIFE</b></div></div></details>
 <p id="controllerStatus" class="controller-status" role="status">Xbox controller? Pair it, then press a button.</p>
 <div id="playNote" class="play-note">Vote after each match. The next round starts automatically.</div></aside></main>
@@ -82,6 +86,7 @@
  <nav class="mode-options hub-tabs" aria-label="Player Hub sections">
   <button type="button" data-hub-tab="profile" class="selected" aria-pressed="true">Profile</button>
   <button type="button" data-hub-tab="friends" aria-pressed="false">Friends</button>
+  <button type="button" data-hub-tab="squad" aria-pressed="false">Squad</button>
   <button type="button" data-hub-tab="rankings" aria-pressed="false">Rankings</button>
  </nav>
  <p id="hubStatus" role="status" aria-live="polite"></p>
@@ -119,10 +124,19 @@
    <div id="hubInvites"></div><div id="hubFriendsList"></div>
   </div>
  </section>
+ <section id="hubSquad" hidden>
+  <p id="squadGuest" class="hub-intro">Sign in with Google to play with a squad.</p>
+  <div id="squadMember" hidden>
+   <p id="squadSummary" class="hub-intro"></p>
+   <div id="squadInvites"></div>
+   <div id="squadRoster"></div>
+   <div id="squadActions" class="squad-actions"></div>
+  </div>
+ </section>
  <section id="hubRankings" hidden>
   <label class="hub-rank-select">Leaderboard <select id="rankingKind"><option value="ranked-ladder">Ranked TDM</option><option value="rankings">Quick Play eliminations</option></select></label>
   <p id="rankingDescription" class="hub-intro"></p>
   <ol id="hubRankList" class="hub-ranks"></ol>
  </section>
 </dialog>
-<script type="module" src="game.js?v=26"></script></body></html>
+<script type="module" src="game.js?v=27"></script></body></html>

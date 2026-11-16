@@ -35,7 +35,7 @@ function loadGoogle() {
   });
 }
 
-export function createPlayerHub(origin, onProfile, joinRoom) {
+export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSquad) {
   let session = read('localStorage',SESSION);
   let current = null;
   let section = 'profile';
@@ -44,6 +44,9 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   let googleAttempt=0;
   let enrollment=null;
   let friendRequests=0, roomInvites=0;
+  let squadState={party:null,invites:[]};
+  let squadVersion=0, squadKey='', squadBusy=false;
+  let lastFriends=[];
   write('localStorage','witty-player-session',null);
   write('sessionStorage','witty-pending-sign-in-key',null);
   const dialog = $('playerHub');
@@ -76,6 +79,8 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       $('hubRename').elements.name.value=profile.name;
     }else{
       friendRequests=roomInvites=0;
+      lastFriends=[];
+      setSquad({party:null,invites:[]});
     }
     renderInboxCount();
     renderSignInOptions();
@@ -88,12 +93,94 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   }
 
   function renderInboxCount() {
-    const count=friendRequests+roomInvites;
+    const count=friendRequests+roomInvites+squadState.invites.length;
     const badge=$('hubInboxCount');
     badge.hidden=!current||count===0;
     badge.textContent=count>99?'99+':String(count);
     $('openPlayerHub').setAttribute('aria-label',!current?'Sign in to Player Hub':
-      count?`Open Player Hub, ${count} pending friend requests or room invites`:'Open Player Hub');
+      count?`Open Player Hub, ${count} pending requests or invites`:'Open Player Hub');
+  }
+
+  function setSquad(data) {
+    const key=JSON.stringify(data);
+    if(key===squadKey)return;
+    squadKey=key;
+    squadState=data;
+    renderInboxCount();
+    renderSquad();
+    if(section==='friends'&&!activeRoom)renderFriends(lastFriends);
+    onSquad(data);
+  }
+
+  async function updateSquad(action,body={}) {
+    if(!session)return null;
+    const activeSession=session;
+    const version=++squadVersion;
+    const result=await api('squad',action?'POST':'GET',action?{action,...body}:undefined);
+    if(session===activeSession&&version===squadVersion)setSquad(result);
+    return result;
+  }
+
+  async function changeSquad(action,body) {
+    if(squadBusy)return null;
+    squadBusy=true;
+    try{return await updateSquad(action,body);}
+    finally{squadBusy=false;}
+  }
+
+  async function squadAction(action,body) {
+    try{
+      const result=await changeSquad(action,body);
+      if(result)status('');
+      return result;
+    }catch(error){
+      status(error.message);
+    }
+  }
+
+  function squadButton(label,handler) {
+    const button=element('button',label,'secondary');
+    button.type='button';
+    button.onclick=handler;
+    return button;
+  }
+
+  function renderSquad() {
+    $('squadGuest').hidden=Boolean(current);
+    $('squadMember').hidden=!current;
+    const {party,invites}=squadState;
+    const me=party?.members.find(member=>member.handle===current?.handle);
+    const leader=party?.leader===current?.handle;
+    const connecting=party?.match&&!party.match.live;
+    $('squadSummary').textContent=party
+      ?connecting?'Connecting your squad…':leader?'Pick a Quick Play mode in the lobby. Queue when your squad is ready.':'Ready up when you’re in the lobby.'
+      :'Create a squad or accept an invite from a friend.';
+    $('squadInvites').replaceChildren(...invites.map(invite=>{
+      const row=element('div','','hub-person');
+      row.append(element('span',invite.name+' invited you to a squad','hub-name'),
+        squadButton('Accept',()=>squadAction('accept',{squad:invite.squad})),
+        squadButton('Decline',()=>squadAction('decline',{squad:invite.squad})));
+      return row;
+    }));
+    $('squadRoster').replaceChildren(...(party?.members??[]).map(member=>
+      element('div',`${member.name} · @${member.handle} · ${member.handle===party.leader?'Leader':member.ready?'Ready':'Not ready'}`,'hub-person')));
+    const actions=$('squadActions');
+    actions.replaceChildren();
+    if(!party){
+      actions.append(squadButton('Create squad',()=>squadAction('create')));
+      return;
+    }
+    if(!connecting&&leader)actions.append(squadButton('Invite friends',()=>select('friends')));
+    if(!connecting&&me&&!leader)actions.append(squadButton(me.ready?'Not ready':'Ready up',()=>squadAction('ready',{ready:!me.ready})));
+    if(party.match?.canRejoin&&!$('lobby').hidden)actions.append(squadButton('Rejoin squad match',()=>rejoinSquad(party.match)));
+    actions.append(squadButton('Leave squad',()=>squadAction('leave')));
+  }
+
+  async function pollSquad() {
+    if(!session||squadBusy||($('lobby').hidden&&!dialog.open))return;
+    const ready=squadState.party?.members.some(member=>member.handle===current?.handle&&member.ready);
+    if(document.hidden&&!ready&&!squadState.party?.match)return;
+    try{await updateSquad();}catch(error){if(error.status===401)endSession();}
   }
 
   async function prepareGoogle() {
@@ -193,6 +280,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   }
 
   function renderFriends(friends) {
+    lastFriends=friends;
     friendRequests=friends.filter(friend=>friend.status==='received').length;
     renderInboxCount();
     const list = $('hubFriendsList');
@@ -219,6 +307,13 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
         row.append(button);
       };
       if(friend.status==='received')action('Accept','accept');
+      const party=squadState.party;
+      if(friend.status==='friend'&&!activeRoom&&(!party||(party.leader===current?.handle&&party.members.length<4))){
+        row.append(squadButton('Squad invite',async()=>{
+          if(!squadState.party&&!await squadAction('create'))return;
+          if(await squadAction('invite',{handle:friend.handle}))status('Squad invite sent.');
+        }));
+      }
       if(friend.status==='friend'&&activeRoom){
         const invite=element('button','Invite','secondary');
         invite.type='button';
@@ -289,7 +384,12 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       button.classList.toggle('selected',selected);
       button.setAttribute('aria-pressed',String(selected));
     }
-    for(const name of ['Profile','Friends','Rankings'])$('hub'+name).hidden = name.toLowerCase()!==tab;
+    for(const name of ['Profile','Friends','Squad','Rankings'])$('hub'+name).hidden = name.toLowerCase()!==tab;
+    if(tab==='squad'){
+      renderSquad();
+      await pollSquad();
+      return;
+    }
     if(tab==='rankings'){
       const list=$('hubRankList');
       const kind=$('rankingKind').value;
@@ -331,6 +431,7 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
     renderStats([]);
     renderFriends([]);
     renderInvites([]);
+    pollSquad();
   }
 
   form('hubGoogleEnroll',async data=>{
@@ -378,13 +479,14 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
       status(error.message);
     }
   };
-  function open(room = null){
+  function open(room = null,tab='profile'){
     activeRoom=room;
     for(const button of dialog.querySelectorAll('[data-hub-tab]')){
       button.hidden=Boolean(room)&&button.dataset.hubTab!=='friends';
     }
-    dialog.showModal();
-    select(room?'friends':'profile');
+    if(!dialog.open)dialog.showModal();
+    clearInterval(inboxTimer);
+    select(room?'friends':tab);
     inboxTimer=setInterval(()=>{if(section==='friends'&&session)refresh();},10_000);
   }
   $('openPlayerHub').onclick = () => open();
@@ -398,12 +500,16 @@ export function createPlayerHub(origin, onProfile, joinRoom) {
   for(const button of dialog.querySelectorAll('[data-hub-tab]'))button.onclick = () => select(button.dataset.hubTab);
   renderSignInOptions();
   refresh();
+  pollSquad();
+  setInterval(pollSquad,2500);
   setInterval(()=>{
     if(session&&!dialog.open&&!document.hidden&&!$('lobby').hidden)refresh();
   },30_000);
 
   return {
     open,
+    queueSquad:rules=>changeSquad('queue',{rules}),
+    cancelSquad:()=>changeSquad('cancel'),
     queueRanked:action=>api('ranked-queue','POST',{action}),
     rankedResult:id=>api('ranked-result','POST',{id}),
     async ticket() {

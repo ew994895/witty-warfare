@@ -13,6 +13,15 @@ export class QuickPlay {
     return attempt;
   }
 
+  register(id) {
+    const attempt=this.queue.then(async()=>{
+      this.active??=(await this.storage.get('publicRooms'))||[];
+      await this.save([id,...this.active.filter(room=>room!==id)]);
+    });
+    this.queue=attempt.catch(()=>{});
+    return attempt;
+  }
+
   async assign(request) {
     this.active ??= (await this.storage.get('publicRooms')) || [];
     const candidates = this.active.slice(0, 24);

@@ -25,7 +25,7 @@ export class Match{
    this.overtimeStartedAt=null;
    const waiting=!this.public&&config.intermission===true;
    this.remaining=waiting?0:this.duration;
-   this.phase=this.ranked?'staging':waiting?'results':'playing';
+   this.phase=this.ranked||config.partySeats&&!config.partyStarted?'staging':waiting?'results':'playing';
    this.round=Number.isSafeInteger(config.round)&&config.round>0?config.round:1;
    this.nextSettings=waiting&&config.nextSettings?roomSettings(config.nextSettings):null;
    this.actors=[];
@@ -100,7 +100,7 @@ export class Match{
      }
    }
  }
- join(id,name,primary=0,account=null){
+ join(id,name,primary=0,account=null,partyMember=false){
    const humans=this.humans();
    let actor=humans.find(a=>a.id===id);
    if(actor){
@@ -130,7 +130,8 @@ export class Match{
    }
    if(isTeamGame(this.settings.rules)){
      const blue=humans.filter(a=>a.team==='blue').length;
-     actor.team=this.settings.teamSetup==='humans-vs-bots'||blue<=humans.length-blue?'blue':'red';
+     if(partyMember&&blue>=limit/2)return null;
+     actor.team=partyMember||this.settings.teamSetup==='humans-vs-bots'||blue<=humans.length-blue?'blue':'red';
    }
    if(this.ranked)actor.team=this.rankedTeams.get(account);
    this.actors.push(actor);

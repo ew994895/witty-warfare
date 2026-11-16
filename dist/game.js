@@ -1,9 +1,9 @@
 import * as THREE from './vendor/three.module.js';
-import {RoomConnection,onlineOrigin} from './network.js?v=24';
+import {RoomConnection,onlineOrigin} from './network.js?v=27';
 import {MAPS,getMap,createMap} from './maps.js?v=24';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,STORM_GRACE_SECONDS,TEAMS,TEAM_NAMES,TEAM_COLORS,comparePlacements,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormDistance,teamWinner} from './rules.js?v=24';
-import {createPlayerHub} from './player-hub.js?v=26';
+import {createPlayerHub} from './player-hub.js?v=27';
 import {createObjectiveDisplay} from './objectives-ui.js?v=24';
 import {assignGamepadBinding,CALIBRATION_STEPS,CONTROLLER_ACTIONS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=21';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
@@ -737,7 +737,7 @@ function leaveOnline(){
  $('pauseCopyRoom').textContent='COPY ROOM INVITE';
  $('resultsCopyRoom').textContent='COPY INVITE';
  setRoomLink(null);
- $('cancelRanked').hidden=true;
+ $('cancelRanked').hidden=$('cancelSquadLaunch').hidden=true;
  setJoining(false);
 }
 function readNetArsenal(data){const old=arsenal.index;arsenal=createArsenal(data.primary);Object.assign(arsenal,data);for(const i of netPending){switchWeapon(arsenal,i.weapon);tickArsenal(arsenal,STEP);if(i.reload)startReload(arsenal);if(i.fire||arsenal.burstRemaining>0)fireRound(arsenal,i.fresh);}if(old!==arsenal.index)buildGun();}
@@ -762,11 +762,14 @@ function syncOnline(m,welcome=false){if(!online)return;const own=m.actors.find(a
  if(online.mode==='custom')online.controls={settings:m.settings,next:m.nextSettings,host:m.host,preference:own.teamPreference,round:m.round};
  if(m.phase==='staging'){
    state='staging';
-   $('roomError').textContent=`Ranked match found · ${online.humans}/8 connected`;
-   $('cancelRanked').hidden=false;
+   $('roomError').textContent=online.partyRoom
+     ?`Squad match · ${online.humans}/${online.partySize} connected`
+     :`Ranked match found · ${online.humans}/8 connected`;
+   $('cancelRanked').hidden=Boolean(online.partyRoom);
+   $('cancelSquadLaunch').hidden=!online.partyRoom;
    return;
  }
- $('cancelRanked').hidden=true;
+ $('cancelRanked').hidden=$('cancelSquadLaunch').hidden=true;
  const newRound=netRound!==m.round;netRound=m.round;if(m.phase==='results'&&state!=='results'){finish();}else if(m.phase==='playing'&&(state==='results'||state==='staging'||state==='lobby'||newRound)){state='playing';$('results').hidden=$('lobby').hidden=$('pause').hidden=true;$('hud').hidden=false;document.body.classList.add('playing');updateHud();if(newRound||online.mode==='ranked')message(m.round===1?'MATCH LIVE':'NEW ROUND',`${activeMap.name} · ${ruleLabel(rules)}`);canvas.focus();if(document.pointerLockElement!==canvas)armMouseCapture();}if(state==='results'){renderResults();if(online.mode!=='ranked')renderVoting(m.voteRemaining,m.votes?.[online.id],m.voteCounts);}renderRoomControls();updateOnlineStatus();}
 function simulateOnline(dt){simTime+=dt;tickArsenal(arsenal,dt);kick=damp(kick,0,12,dt);gunKick=damp(gunKick,0,18,dt);bloom=damp(bloom,0,6,dt);const connected=online.net.ready;const active=connected&&state==='playing'&&!player.inactive;aiming=active&&arsenal.index!==KNIFE&&(rightDown||toggleAim||padHeld('lt'))&&!arsenal.reloading&&!arsenal.switching&&player.dead===0;ads=damp(ads,aiming?1:0,arsenal.index===1?15:22,dt);
  if(active&&player.dead===0){if(!controllerActive&&lookMode==='embedded'&&mouseInside)player.yaw-=edgeX*2.7*dt;const look=2*((1-ads)+ads*WEAPONS[arsenal.index].zoom/prefs.fov);player.yaw+=((keys.has('ArrowLeft')?1:0)-(keys.has('ArrowRight')?1:0))*look*dt;player.pitch=clamp(player.pitch+((keys.has('ArrowUp')?1:0)-(keys.has('ArrowDown')?1:0))*dt,-1.45,1.45);controllerLook(dt);}
@@ -891,7 +894,7 @@ function updateConnectionNotice(text){
 }
 function updateOnlineStatus(){
  if(online.status)return;
- const label=online.mode==='ranked'?'RANKED · 4V4 TDM':online.mode==='public'?`PUBLIC · ${online.humans}/8 HUMANS`:`CUSTOM · ${online.code}`;
+ const label=online.mode==='ranked'?'RANKED · 4V4 TDM':online.mode==='public'?`${online.partyRoom?'SQUAD':'PUBLIC'} · ${online.humans}/8 HUMANS`:`CUSTOM · ${online.code}`;
  const text=online.ping==null?label:`${label} · ${online.ping}ms`;
  if($('onlineStatus').textContent!==text)$('onlineStatus').textContent=text;
 }
@@ -975,13 +978,15 @@ async function showRankedResult(connection){
    $('rankedResult').textContent='Result pending. Check your Player Hub shortly.';
  }
 }
-async function enterRoom(action,rankedId){
+async function enterRoom(action,rankedId,squadMatch){
  if(online||$('quickPlay').disabled)return;
  initAudio();
  setJoining(true);
  const isPublic=action==='public';
+ const partyRoom=squadMatch?.room;
+ if(partyRoom)$('cancelSquadLaunch').hidden=false;
  const isRanked=action==='ranked';
- $('roomError').textContent=isRanked?'Connecting to ranked match…':isPublic?'Finding a public match…':action==='create'?'Creating your room…':'Joining room…';
+ $('roomError').textContent=isRanked?'Connecting to ranked match…':partyRoom?'Connecting your squad…':isPublic?'Finding a public match…':action==='create'?'Creating your room…':'Joining room…';
  try{
    let code=isPublic||isRanked?null:$('roomCode').value.trim().toUpperCase();
    if(action==='create'){
@@ -996,12 +1001,12 @@ async function enterRoom(action,rankedId){
    }
    if(!isPublic&&!isRanked&&!/^[A-Z2-9]{8}$/.test(code))throw new Error('Enter an eight-character room code.');
    const session=getGuestSession();
-   const connection={code,id:session,mode:isRanked?'ranked':isPublic?'public':'custom',rankedId,net:null};
+   const connection={code,id:session,mode:isRanked?'ranked':isPublic?'public':'custom',rankedId,partyRoom,partySize:squadMatch?.size,net:null};
    online=connection;
    if(!$('name').readOnly)prefs.name=$('name').value.trim()||'Rookie';
    prefs.primary=selected;
    savePrefs();
-   connection.net=new RoomConnection(code,{session,name:$('name').value.trim()||'Rookie',primary:selected,...(isRanked?{rankedId}:isPublic?{rules:$('playlist').value}:{})},{
+   connection.net=new RoomConnection(code,{session,name:$('name').value.trim()||'Rookie',primary:selected,...(isRanked?{rankedId}:isPublic?{rules:squadMatch?.rules??$('playlist').value,...(partyRoom?{partyRoom}:{})}:{})},{
      ticket:()=>hub.ticket(),
      welcome:m=>{
        if(online!==connection)return;
@@ -1070,7 +1075,51 @@ async function enterRoom(action,rankedId){
  }
 }
 for(const button of modeButtons)button.onclick=()=>selectMode(button.dataset.mode);
-$('quickPlay').onclick=()=>enterRoom('public');
+let squadState={party:null,invites:[]},squad=null,lastSquadLaunch=null,queueingSquad=false;
+function joinSquadMatch(match,manual=false){
+ if(online||state!=='lobby'||rankedSearch||$('quickPlay').disabled||(!manual&&lastSquadLaunch===match.room))return;
+ lastSquadLaunch=match.room;
+ if($('playerHub').open)$('playerHub').close();
+ selectMode('public');
+ $('playlist').value=match.rules;
+ updatePlaylistPreview('public');
+ enterRoom('public',undefined,match);
+}
+function updateLobbySquad(data){
+ squadState=data;
+ const {party,invites}=data;
+ squad=party;
+ $('squadLobby').hidden=!accountProfile;
+ $('openSquad').textContent=party?`SQUAD · ${party.members.length}/4`:invites.length?`SQUAD INVITES · ${invites.length}`:'SQUAD';
+ const label=$('quickPlay').firstChild;
+ label.textContent=party?.members.length>1
+   ?party.leader===accountProfile?.handle?'SQUAD QUICK PLAY ':'SQUAD STATUS '
+   :'QUICK PLAY ';
+ if(online?.partyRoom&&(state==='lobby'||state==='staging')&&party?.match?.room!==online.partyRoom){
+   lobby();
+   $('roomError').textContent='Squad launch cancelled. Ready up to try again.';
+ }
+ if(party?.match&&!party.match.live)joinSquadMatch(party.match);
+}
+$('openSquad').onclick=()=>hub.open(null,'squad');
+$('cancelSquadLaunch').onclick=async()=>{
+ if(!online?.partyRoom||state==='playing')return;
+ try{
+   await hub.cancelSquad();
+   if(online?.partyRoom&&state!=='playing')lobby();
+ }catch(error){$('roomError').textContent=error.message;}
+};
+$('quickPlay').onclick=async()=>{
+ if(!squad||squad.members.length<2){enterRoom('public');return;}
+ if(squad.leader!==accountProfile?.handle){hub.open(null,'squad');return;}
+ if(queueingSquad||online)return;
+ queueingSquad=true;
+ try{
+   const result=await hub.queueSquad($('playlist').value);
+   if(result?.party?.match&&!result.party.match.live)updateLobbySquad(result);
+ }catch(error){$('roomError').textContent=error.message;}
+ finally{queueingSquad=false;}
+};
 $('rankedPlay').onclick=findRanked;
 $('createRoom').onclick=()=>enterRoom('create');
 $('joinRoom').onclick=()=>enterRoom('join');
@@ -1143,6 +1192,8 @@ $('respawnLoadout').onclick=equipAndRespawn;
 let accountProfile=null;
 const hub=createPlayerHub(onlineOrigin,profile=>{
  accountProfile=profile;
+ $('squadLobby').hidden=!profile;
+ updateLobbySquad(profile?squadState:{party:null,invites:[]});
  $('name').readOnly=Boolean(profile);
  $('name').value=profile?profile.name:prefs.name;
  renderRoomControls();
@@ -1151,7 +1202,7 @@ const hub=createPlayerHub(onlineOrigin,profile=>{
  selectMode('custom');
  $('roomCode').value=code;
  enterRoom('join');
-});
+},updateLobbySquad,match=>joinSquadMatch(match,true));
 $('pauseFriendInvite').onclick=$('resultsFriendInvite').onclick=()=>{if(online?.code&&accountProfile)hub.open(online.code);};
 function setControllerActive(active){
  if(controllerActive===active)return;
@@ -1178,6 +1229,7 @@ function controllerMenu(){
   if(calibration?.pending){cancelCalibration();return;}
   if(modalClose)modalClose.click();
   else if(state==='paused')resume();
+  else if(online?.partyRoom&&!$('cancelSquadLaunch').hidden)$('cancelSquadLaunch').click();
   else if(state==='staging'||(state==='lobby'&&!$('cancelRanked').hidden))$('cancelRanked').click();
   return;
  }

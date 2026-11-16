@@ -90,6 +90,10 @@ The SQLite-backed Player Hub is deployed as a separate Durable Object. The room 
 
 **Quick Play** has separate playlists for Free-for-all, Team Deathmatch, Gun Game, Storm Survival, and the four objective modes. Guests can join in progress, and bots fill open seats. The vote lasts 15 seconds and the lobby carries forward. The existing public eliminations leaderboard is called **Quick Play eliminations** in Player Hub.
 
+Signed-in friends can form a **Squad** of up to four in Player Hub. The leader invites accepted friends, members accept in the Squad tab, and everyone except the leader readies up before the leader selects **Squad Quick Play**. The game reserves a room for the squad before check-in and opens its spare seats to Quick Play when everyone connects. Squads play on one side in team modes and share the same lobby in free-for-all modes. A map vote takes the group into the next round. Returning to the lobby leaves the squad available for another search.
+
+For the squad integration test, run the localhost account fixture with `--var SQUAD_TEST_SHORT_ROUND:1` and run `node tests/squads.integration.mjs`. It verifies invites, cancelled launches, check-in, team placement, solo backfill, reconnects, and the next round.
+
 **Ranked** is a signed-in, solo 4v4 Team Deathmatch queue. It waits for eight humans, balances the teams by rating, and selects a map from the arena pool. The assigned players have 35 seconds to connect. A match that fails to start leaves ratings unchanged. An active match keeps each player's seat open for reconnects. Leaving and staying away can count as a loss. Ranked ends at the normal TDM time or kill limit and returns a rating result. Select **Queue Ranked Again** to play another match.
 
 Five completed placement matches unlock a player's visible rating and eligibility for the Ranked ladder. Each result updates a player's rating based on the team outcome and expected result from the teams' average ratings. Personal kills and accuracy do not affect rating.

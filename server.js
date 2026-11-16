@@ -4,7 +4,7 @@ import {gameRules,roomSettings,teamWinner} from './dist/rules.js';
 import {PLAYER_DATA_EPOCH,playerHub} from './server/player-hub.js';
 import {roundRecord} from './server/round-record.js';
 export {PlayerHub} from './server/player-hub.js';
-const accountPaths=new Set(['sign-out','profile','ticket','friends','invites','rankings','ranked-ladder','ranked-queue','ranked-result','sign-in-options','google-challenge','google-sign-in','google-enroll']);
+const accountPaths=new Set(['sign-out','profile','ticket','friends','invites','squad','rankings','ranked-ladder','ranked-queue','ranked-result','sign-in-options','google-challenge','google-sign-in','google-enroll']);
 
 async function accountRequest(request, env, path, origin){
   const headers=new Headers();
@@ -61,6 +61,10 @@ async function withPlayerIdentity(request, env){
 const rankedRequest=(env,action,body)=>playerHub(env).fetch('https://players/internal/ranked-'+action,{
   method:'POST',body:JSON.stringify(body)
 });
+const squadRequest=(env,action,body)=>playerHub(env).fetch('https://players/internal/squad-'+action,{
+  method:'POST',body:JSON.stringify(body)
+});
+const quickDirectory=rules=>rules==='ffa'?'public-directory':'public-directory-'+rules;
 const sessionId=req=>new URL(req.url).searchParams.get('session');
 const validSession=id=>/^[a-zA-Z0-9-]{20,64}$/.test(id||'');
 async function playerId(roomId, session){
@@ -92,11 +96,15 @@ export default {async fetch(req,env){const url=new URL(req.url);if(!url.pathname
    if(custom)return env.ROOMS.get(env.ROOMS.idFromName(custom[1])).fetch(req);
    const publicRoom=url.pathname.match(/^\/api\/quick-play\/([a-f0-9-]{36})$/);
    if(publicRoom)return env.ROOMS.get(env.ROOMS.idFromName('public:'+publicRoom[1])).fetch(req);
+   const squadRoom=url.pathname.match(/^\/api\/party-play\/([a-f0-9-]{36})$/);
+   if(squadRoom){
+     if(!req.headers.has('X-Witty-Account'))return json({error:'Sign in to play with a squad.'},401,origin);
+     return env.ROOMS.get(env.ROOMS.idFromName('public:'+squadRoom[1])).fetch(req);
+   }
    if(url.pathname==='/api/quick-play'){
      if(!validSession(sessionId(req)))return json({error:'Invalid session'},400,origin);
      const rules=gameRules(url.searchParams.get('rules'));
-     const directory=rules==='ffa'?'public-directory':'public-directory-'+rules;
-     return env.ROOMS.get(env.ROOMS.idFromName(directory)).fetch(req);
+     return env.ROOMS.get(env.ROOMS.idFromName(quickDirectory(rules))).fetch(req);
    }
  }
  return json({error:'Room not found'},404,origin);
@@ -106,6 +114,12 @@ export class ArenaRoom{
  async fetch(req){
   await this.ready;
   const url=new URL(req.url);
+  if(url.pathname==='/quick-register'){
+    const {room}=await req.json();
+    this.quickPlay??=new QuickPlay(this.ctx.storage,this.env.ROOMS);
+    await this.quickPlay.register(room);
+    return Response.json({ok:true});
+  }
   if(url.pathname==='/api/quick-play'){
     this.quickPlay??=new QuickPlay(this.ctx.storage,this.env.ROOMS);
     return this.quickPlay.join(req);
@@ -129,6 +143,23 @@ export class ArenaRoom{
   }
   const account=req.headers.get('X-Witty-Account');
   const name=account?decodeURIComponent(req.headers.get('X-Witty-Callsign')):url.searchParams.get('name');
+  const squadRoom=url.pathname.startsWith('/api/party-play/')?url.pathname.split('/').at(-1):null;
+  if(squadRoom){
+    if(!this.config){
+      const {launch}=await (await squadRequest(this.env,'room',{room:squadRoom,handle:account})).json();
+      if(!launch)return Response.json({error:'Squad launch is unavailable.'},{status:404});
+      if(!this.config){
+        this.config={public:true,mapId:'dust-court',rules:launch.rules,partySeats:launch.seats,deadline:launch.deadline,partyRoom:squadRoom};
+        this.match=new Match(this.config);
+        await this.ctx.storage.put('config',this.config);
+      }
+    }
+    if(!this.config.partySeats?.includes(account))return Response.json({error:'No squad seat was reserved for you.'},{status:403});
+  }
+  if(this.config?.partySeats&&this.match.phase==='staging'){
+    if(!squadRoom)return Response.json({error:'Squad is still connecting.'},{status:409});
+    if(this.partyCancelled||this.config.deadline<=Date.now())return Response.json({error:'Squad reservation expired.'},{status:404});
+  }
   if(url.pathname.startsWith('/api/ranked/')){
     if(!account)return Response.json({error:'Sign in to play Ranked'},{status:401});
     const id=url.pathname.split('/')[3];
@@ -151,10 +182,10 @@ export class ArenaRoom{
   const id=await playerId(this.ctx.id.toString(),account?'account:'+account:session);
   this.expireSeats(Date.now());
   const idlePublic=this.config?.public&&!this.clients.size&&!this.disconnected.size;
-  if(!this.match||(idlePublic&&url.pathname!=='/quick-start')){
+  if(!this.match||(idlePublic&&url.pathname!=='/quick-start'&&!squadRoom)){
     return Response.json({error:'Room not found. Check the code or create a room.'},{status:404});
   }
-  const a=this.match.join(id,name,Number(url.searchParams.get('primary')),account);if(!a)return Response.json({error:'This room is full'},{status:409});const pair=new WebSocketPair(),[client,socket]=Object.values(pair);socket.accept();const old=this.clients.get(id);if(old)old.socket.close(4000,'Reconnected elsewhere');const state={socket,eventId:this.match.eventId,round:this.match.round,tokens:90,tokenTime:Date.now()};this.clients.set(id,state);this.disconnected.delete(id);
+  const a=this.match.join(id,name,Number(url.searchParams.get('primary')),account,Boolean(squadRoom));if(!a)return Response.json({error:'This room is full'},{status:409});const pair=new WebSocketPair(),[client,socket]=Object.values(pair);socket.accept();const old=this.clients.get(id);if(old)old.socket.close(4000,'Reconnected elsewhere');const state={socket,eventId:this.match.eventId,round:this.match.round,tokens:90,tokenTime:Date.now()};this.clients.set(id,state);this.disconnected.delete(id);
  socket.addEventListener('message',event=>{if(this.clients.get(id)!==state)return;const now=Date.now();state.tokens=Math.min(90,state.tokens+(now-state.tokenTime)*.06);state.tokenTime=now;if(state.tokens<1||typeof event.data!=='string'||event.data.length>16000){socket.close(1008,'Too many messages');return;}state.tokens--;let data;try{data=JSON.parse(event.data);}catch{return;}if(!data||typeof data!=='object')return;if(data.type==='probeReply'&&data.n===state.probe){const actor=this.match.actors.find(a=>a.id===id);if(actor)actor.rtt=Math.min(.5,(Date.now()-state.probeTime)/1000);state.probe=null;}if(data.type==='inputs')this.match.inputs(id,data.frames);if(data.type==='loadout')this.match.setLoadout(id,data.primary,data.respawn===true);if(data.type==='vote')this.match.vote(id,data.mapId,data.round);if(data.type==='roomSettings'){
    const accepted=this.match.queueSettings(id,data.settings,data.round);
    if(accepted&&this.match.phase==='results')this.persistConfig();
@@ -173,6 +204,7 @@ export class ArenaRoom{
   this.clients.delete(id);
   if(event.code===1000&&event.reason==='Left room'){
     this.match.leave(id);
+    if(this.config.partySeats&&this.match.phase==='staging')this.ctx.waitUntil(this.cancelParty());
   }else{
     this.disconnected.set(id,Date.now()+15000);
     this.match.disconnect(id);
@@ -189,7 +221,37 @@ export class ArenaRoom{
    this.rankedStarting=true;
    this.ctx.waitUntil(this.startRanked());
  }
+ if(this.config.partySeats&&this.clients.size===this.config.partySeats.length&&!this.partyStarting&&this.match.phase==='staging'){
+   this.partyStarting=true;
+   this.ctx.waitUntil(this.startParty());
+ }
  return new Response(null,{status:101,webSocket:client});
+ }
+ async startParty(){
+  const room=this.config.partyRoom;
+  try{
+    const response=await squadRequest(this.env,'start',{room});
+    if(!(await response.json()).ok||this.partyCancelled||this.clients.size!==this.config.partySeats.length){
+      await this.cancelParty();
+      return;
+    }
+    this.config.partyStarted=true;
+    this.match.phase='playing';
+    for(const actor of this.match.actors)this.match.respawn(actor);
+    await this.ctx.storage.put('config',this.config);
+  }catch{
+    await this.cancelParty();
+    return;
+  }
+  const directory=this.env.ROOMS.get(this.env.ROOMS.idFromName(quickDirectory(this.match.settings.rules)));
+  await directory.fetch('https://room/quick-register',{method:'POST',body:JSON.stringify({room})});
+ }
+ async cancelParty(){
+  if(this.partyCancelled||this.match.phase!=='staging')return;
+  this.partyCancelled=true;
+  this.stopClock();
+  for(const {socket} of this.clients.values())socket.close(4005,'Squad launch cancelled');
+  await squadRequest(this.env,'stop',{room:this.config.partyRoom});
  }
  async startRanked(){
   const id=this.config.rankedId;
@@ -256,6 +318,10 @@ export class ArenaRoom{
   }
  }
  startClock(){if(this.clock)return;this.previous=Date.now();this.accumulator=0;this.clock=setInterval(()=>{const now=Date.now();this.accumulator+=Math.min((now-this.previous)/1000,.1);this.previous=now;
+ if(this.config.partySeats&&this.match.phase==='staging'&&now>=this.config.deadline){
+   this.ctx.waitUntil(this.cancelParty());
+   return;
+ }
  if(this.match.ranked&&this.match.phase==='staging'&&now>=this.config.deadline&&!this.rankedStarting){
    this.ctx.waitUntil(this.cancelRanked());
    return;
