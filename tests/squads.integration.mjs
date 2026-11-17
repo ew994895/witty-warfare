@@ -54,28 +54,29 @@ const party=user=>api('squad',null,user.session).then(data=>data.party);
 try{
   const users=await Promise.all(Array.from({length:5},(_,i)=>createFixturePlayer(api,'Squad QA '+i)));
   const [leader,...members]=users;
-  const {party:squad}=await action(leader,'create');
   for(const member of members){
     await action(leader,'invite',{handle:member.handle},403);
     await api('friends',{action:'request',handle:member.handle},leader.session);
     await api('friends',{action:'accept',handle:leader.handle},member.session);
-    await action(leader,'invite',{handle:member.handle});
+    assert.ok((await api('friends',null,leader.session)).friends.some(friend=>friend.handle===member.handle&&friend.status==='friend'));
+    const invited=await action(leader,'invite',{handle:member.handle});
+    assert.ok(invited.sent.includes(member.handle));
   }
+  const squad=await party(leader);
+  await action(leader,'queue',{rules:'tdm'},409);
   for(const member of members.slice(0,3)){
     const inbox=await api('squad',null,member.session);
     assert.equal(inbox.invites[0].sender,leader.handle);
     await action(member,'accept',{squad:squad.id});
+    assert.ok(!(await api('squad',null,leader.session)).sent.includes(member.handle));
   }
   await action(members[3],'accept',{squad:squad.id},409);
-  await action(leader,'queue',{rules:'tdm'},409);
   await action(members[0],'queue',{rules:'tdm'},403);
-  for(const member of members.slice(0,3))await action(member,'ready',{ready:true});
   const cancelled=(await action(leader,'queue',{rules:'tdm'})).party.match;
   assert.ok(cancelled.room);
   await action(members[0],'cancel');
   assert.equal((await party(leader)).match,null);
   await assert.rejects(connect('/api/party-play/'+cancelled.room,leader),/404/);
-  for(const member of members.slice(0,3))await action(member,'ready',{ready:true});
 
   const {room}= (await action(leader,'queue',{rules:'tdm'})).party.match;
   const partyPath='/api/party-play/'+room;
@@ -103,7 +104,7 @@ try{
   const resumed=await connect(partyPath,members[0]);
   assert.equal(resumed.id,original.id);
   squadSockets[1]=resumed;
-  console.log('PASS: friends and readiness, cancellation, squad check-in, same team, public backfill and reconnect');
+  console.log('PASS: friend invites, immediate matchmaking, cancellation, squad check-in, same team, public backfill and reconnect');
 
   if(!process.env.ROOM_TEST_SKIP_ROUND){
     await until(()=>squadSockets.every(client=>client.last.phase==='results'),'Squad should reach results together',193000);
@@ -121,7 +122,6 @@ try{
   assert.equal(remaining.members.length,3);
   assert.ok(remaining.members.some(member=>member.handle===remaining.leader));
   const nextLeader=members.find(member=>member.handle===remaining.leader);
-  for(const member of members.slice(0,3).filter(member=>member!==nextLeader))await action(member,'ready',{ready:true});
   const ffa=(await action(nextLeader,'queue',{rules:'ffa'})).party.match;
   const ffaSquad=await Promise.all(members.slice(0,3).map(member=>connect('/api/party-play/'+ffa.room,member)));
   await until(()=>ffaSquad.every(client=>client.last.phase==='playing'),'Free-for-all squad should start together');

@@ -3,7 +3,7 @@ import {RoomConnection,onlineOrigin} from './network.js?v=27';
 import {MAPS,getMap,createMap} from './maps.js?v=24';
 import {VOTE_SECONDS,nextArena} from './rounds.js';
 import {GAME_RULES,GUN_ORDER,OBJECTIVE_RULES,STORM_GRACE_SECONDS,TEAMS,TEAM_NAMES,TEAM_COLORS,comparePlacements,isObjective,isTeamGame,opponents,roomSettings,spawnTeamBias,stormDistance,teamWinner} from './rules.js?v=24';
-import {createPlayerHub} from './player-hub.js?v=27';
+import {createPlayerHub} from './player-hub.js?v=28';
 import {createObjectiveDisplay} from './objectives-ui.js?v=24';
 import {assignGamepadBinding,CALIBRATION_STEPS,CONTROLLER_ACTIONS,createGamepadCalibration,createGamepadInput} from './gamepad.js?v=21';
 import {createLobbyAudio} from './lobby-audio.js?v=15';
@@ -732,7 +732,7 @@ function leaveOnline(){
  remoteActors.clear();
  actors.splice(0,actors.length,player,...bots);
  updateConnectionNotice('');
- $('onlineStatus').hidden=$('pauseCopyRoom').hidden=true;
+ $('onlineStatus').hidden=$('pauseCopyRoom').hidden=$('hudSquad').hidden=true;
  $('pauseTitle').textContent='Arena paused.';
  $('pauseCopyRoom').textContent='COPY ROOM INVITE';
  $('resultsCopyRoom').textContent='COPY INVITE';
@@ -1003,6 +1003,7 @@ async function enterRoom(action,rankedId,squadMatch){
    const session=getGuestSession();
    const connection={code,id:session,mode:isRanked?'ranked':isPublic?'public':'custom',rankedId,partyRoom,partySize:squadMatch?.size,net:null};
    online=connection;
+   renderSquadHud(partyRoom?squad?.members:[]);
    if(!$('name').readOnly)prefs.name=$('name').value.trim()||'Rookie';
    prefs.primary=selected;
    savePrefs();
@@ -1087,21 +1088,28 @@ function joinSquadMatch(match,manual=false){
 }
 function updateLobbySquad(data){
  squadState=data;
- const {party,invites}=data;
+ const {party}=data;
  squad=party;
- $('squadLobby').hidden=!accountProfile;
- $('openSquad').textContent=party?`SQUAD · ${party.members.length}/4`:invites.length?`SQUAD INVITES · ${invites.length}`:'SQUAD';
  const label=$('quickPlay').firstChild;
  label.textContent=party?.members.length>1
-   ?party.leader===accountProfile?.handle?'SQUAD QUICK PLAY ':'SQUAD STATUS '
+   ?party.leader===accountProfile?.handle?'SQUAD QUICK PLAY ':'VIEW SQUAD '
    :'QUICK PLAY ';
  if(online?.partyRoom&&(state==='lobby'||state==='staging')&&party?.match?.room!==online.partyRoom){
    lobby();
-   $('roomError').textContent='Squad launch cancelled. Ready up to try again.';
+   $('roomError').textContent='Squad match cancelled. Your leader can start another.';
  }
  if(party?.match&&!party.match.live)joinSquadMatch(party.match);
 }
-$('openSquad').onclick=()=>hub.open(null,'squad');
+function renderSquadHud(members=[]){
+ const hud=$('hudSquad');
+ const names=members.filter(member=>member.handle!==accountProfile?.handle);
+ hud.hidden=names.length===0;
+ hud.replaceChildren(...names.map(member=>{
+   const name=document.createElement('span');
+   name.textContent=member.name;
+   return name;
+ }));
+}
 $('cancelSquadLaunch').onclick=async()=>{
  if(!online?.partyRoom||state==='playing')return;
  try{
@@ -1111,7 +1119,11 @@ $('cancelSquadLaunch').onclick=async()=>{
 };
 $('quickPlay').onclick=async()=>{
  if(!squad||squad.members.length<2){enterRoom('public');return;}
- if(squad.leader!==accountProfile?.handle){hub.open(null,'squad');return;}
+ if(squad.leader!==accountProfile?.handle){
+   $('squadLobby').open=true;
+   $('squadLobby').querySelector('summary').focus();
+   return;
+ }
  if(queueingSquad||online)return;
  queueingSquad=true;
  try{
@@ -1192,7 +1204,6 @@ $('respawnLoadout').onclick=equipAndRespawn;
 let accountProfile=null;
 const hub=createPlayerHub(onlineOrigin,profile=>{
  accountProfile=profile;
- $('squadLobby').hidden=!profile;
  updateLobbySquad(profile?squadState:{party:null,invites:[]});
  $('name').readOnly=Boolean(profile);
  $('name').value=profile?profile.name:prefs.name;

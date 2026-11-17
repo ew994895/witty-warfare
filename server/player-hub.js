@@ -314,6 +314,7 @@ export class PlayerHub {
       return reply({profile:this.profile(handle)});
     }
     if (path === '/invites' && method === 'POST') return this.changeInvite(handle,await request.json());
+    if (path === '/friends' && method === 'GET') return reply({friends:this.friends(handle)});
     if (path === '/friends' && method === 'POST') return this.changeFriend(handle,await request.json());
     return fail('Player Hub route not found.',404);
   }

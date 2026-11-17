@@ -15,7 +15,7 @@ export class Squads {
         rules TEXT, deadline INTEGER, live INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS squad_members (
-        handle TEXT PRIMARY KEY, squad TEXT NOT NULL, joined INTEGER NOT NULL, ready INTEGER NOT NULL DEFAULT 0
+        handle TEXT PRIMARY KEY, squad TEXT NOT NULL, joined INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS squad_roster ON squad_members(squad, joined);
       CREATE TABLE IF NOT EXISTS squad_invites (
@@ -33,13 +33,12 @@ export class Squads {
   }
 
   members(id){
-    return this.sql.exec(`SELECT m.handle,p.display_name AS name,m.ready
+    return this.sql.exec(`SELECT m.handle,p.display_name AS name
       FROM squad_members m JOIN profiles p USING(handle) WHERE m.squad=? ORDER BY m.joined,m.handle`,id).toArray();
   }
 
   clearLaunch(id){
     this.sql.exec('UPDATE squads SET room=NULL,rules=NULL,deadline=NULL,live=0 WHERE id=?',id);
-    this.sql.exec('UPDATE squad_members SET ready=0 WHERE squad=?',id);
   }
 
   expire(group,now){
@@ -62,8 +61,19 @@ export class Squads {
           canRejoin:Boolean(squad.live&&this.one('SELECT joined FROM squad_members WHERE handle=?',handle).joined<=squad.deadline-JOIN_TTL)
         }:null
       }:null,
-      invites
+      invites,
+      sent:squad?.leader===handle?this.sql.exec(
+        'SELECT recipient FROM squad_invites WHERE squad=? AND expires>? ORDER BY recipient',squad.id,now
+      ).toArray().map(invite=>invite.recipient):[]
     };
+  }
+
+  create(handle,now){
+    const id=crypto.randomUUID();
+    this.sql.exec('INSERT INTO squads (id,leader) VALUES (?,?)',id,handle);
+    this.sql.exec('INSERT INTO squad_members (handle,squad,joined) VALUES (?,?,?)',handle,id,now);
+    this.sql.exec('DELETE FROM squad_invites WHERE recipient=?',handle);
+    return id;
   }
 
   change(handle,body,now=Date.now()){
@@ -74,25 +84,21 @@ export class Squads {
       const leader=squad?.leader===handle;
       switch(body.action){
         case 'create':
-          if(!squad){
-            const id=crypto.randomUUID();
-            this.sql.exec('INSERT INTO squads (id,leader) VALUES (?,?)',id,handle);
-            this.sql.exec('INSERT INTO squad_members (handle,squad,joined) VALUES (?,?,?)',handle,id,now);
-            this.sql.exec('DELETE FROM squad_invites WHERE recipient=?',handle);
-          }
+          if(!squad)this.create(handle,now);
           break;
         case 'invite': {
-          if(!leader||joining)return error('The squad leader can invite friends before matchmaking.');
+          if((squad&&!leader)||joining)return error('The squad leader can invite friends before matchmaking.');
           const friend=typeof body.handle==='string'?body.handle:'';
           const [first,second]=[handle,friend].sort();
           if(!this.one('SELECT 1 FROM friendships WHERE first=? AND second=? AND accepted=1',first,second)){
             return error('Only accepted friends can be invited.',403);
           }
-          if(this.members(squad.id).length>=CAPACITY)return error('The squad is full.');
+          if(squad&&this.members(squad.id).length>=CAPACITY)return error('The squad is full.');
           if(this.find(friend))return error('That friend is already in a squad.');
-          const sent=this.one('SELECT COUNT(*) AS count FROM squad_invites WHERE squad=?',squad.id).count;
-          if(sent>=12&&!this.one('SELECT 1 FROM squad_invites WHERE squad=? AND recipient=?',squad.id,friend))return error('Wait for some invites to clear before sending more.');
-          this.sql.exec('INSERT OR REPLACE INTO squad_invites VALUES (?,?,?,?)',squad.id,friend,handle,now+INVITE_TTL);
+          const id=squad?.id??this.create(handle,now);
+          const sent=this.one('SELECT COUNT(*) AS count FROM squad_invites WHERE squad=?',id).count;
+          if(sent>=12&&!this.one('SELECT 1 FROM squad_invites WHERE squad=? AND recipient=?',id,friend))return error('Wait for some invites to clear before sending more.');
+          this.sql.exec('INSERT OR REPLACE INTO squad_invites VALUES (?,?,?,?)',id,friend,handle,now+INVITE_TTL);
           break;
         }
         case 'accept': {
@@ -112,18 +118,12 @@ export class Squads {
         case 'decline':
           if(typeof body.squad==='string')this.sql.exec('DELETE FROM squad_invites WHERE squad=? AND recipient=?',body.squad,handle);
           break;
-        case 'ready':
-          if(!squad||joining||leader)return error('Ready status is available to squad members in the lobby.');
-          this.sql.exec('UPDATE squad_members SET ready=? WHERE handle=?',Number(body.ready===true),handle);
-          break;
         case 'queue': {
           if(!leader)return error('Only the squad leader can start Quick Play.',403);
           if(joining)break;
           if(!Object.hasOwn(GAME_RULES,body.rules))return error('Choose a Quick Play mode.',400);
           const members=this.members(squad.id);
-          if(members.length<2||members.some(member=>member.handle!==handle&&!member.ready)){
-            return error('Your squad needs at least two players. Everyone else must be ready.');
-          }
+          if(members.length<2)return error('Invite a friend to start Squad Quick Play.');
           this.sql.exec('UPDATE squads SET room=?,rules=?,deadline=?,live=0 WHERE id=?',crypto.randomUUID(),body.rules,now+JOIN_TTL,squad.id);
           break;
         }
@@ -158,10 +158,8 @@ export class Squads {
 
   start(room,now=Date.now()){
     return this.storage.transactionSync(()=>{
-      const squad=this.one('UPDATE squads SET live=1 WHERE room=? AND live=0 AND deadline>? RETURNING id',room,now);
-      if(!squad)return Boolean(this.one('SELECT 1 FROM squads WHERE room=? AND live=1',room));
-      this.sql.exec('UPDATE squad_members SET ready=0 WHERE squad=?',squad.id);
-      return true;
+      const started=this.one('UPDATE squads SET live=1 WHERE room=? AND live=0 AND deadline>? RETURNING id',room,now);
+      return Boolean(started||this.one('SELECT 1 FROM squads WHERE room=? AND live=1',room));
     });
   }
 

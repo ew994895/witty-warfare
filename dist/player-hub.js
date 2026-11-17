@@ -46,11 +46,13 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   let friendRequests=0, roomInvites=0;
   let squadState={party:null,invites:[]};
   let squadVersion=0, squadKey='', squadBusy=false;
-  let lastFriends=[];
+  let lastFriends=[], friendsVersion=0;
   write('localStorage','witty-player-session',null);
   write('sessionStorage','witty-pending-sign-in-key',null);
   const dialog = $('playerHub');
   const status = text => {$('hubStatus').textContent = text;};
+  const lobbyStatus = text => {$('lobbySquadStatus').textContent = text;};
+  const squadPanel=$('squadLobby');
 
   async function api(path, method = 'GET', body) {
     const headers = {};
@@ -70,6 +72,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   }
 
   function setProfile(profile) {
+    const changedAccount=current?.handle!==profile?.handle;
     current = profile;
     $('hubFriendsGuest').hidden = Boolean(profile);
     $('hubMember').hidden = $('hubFriendsMember').hidden = !profile;
@@ -80,16 +83,28 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     }else{
       friendRequests=roomInvites=0;
       lastFriends=[];
+      squadPanel.open=false;
+      lobbyStatus('');
       setSquad({party:null,invites:[]});
     }
     renderInboxCount();
     renderSignInOptions();
+    if(changedAccount)renderLobbySquad();
     onProfile(profile);
   }
 
   function renderSignInOptions() {
     $('hubGoogle').hidden=Boolean(current||enrollment);
     $('hubGoogleEnroll').hidden=!enrollment;
+    $('hubTabs').hidden=!current&&section!=='rankings';
+    dialog.classList.toggle('hub-sign-in',!current&&section==='profile');
+    $('hubHeading').textContent=activeRoom?'Invite to room':current?'Player Hub':
+      section==='rankings'?'Rankings':enrollment?'Create your profile':'Sign in to play together';
+    $('closePlayerHub').setAttribute('aria-label','Close '+$('hubHeading').textContent);
+    for(const button of $('hubTabs').querySelectorAll('button')){
+      button.hidden=activeRoom?button.dataset.hubTab!=='friends':!current&&button.dataset.hubTab==='friends';
+      if(button.dataset.hubTab==='profile')button.textContent=current?'Profile':'Sign in';
+    }
   }
 
   function renderInboxCount() {
@@ -104,11 +119,13 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   function setSquad(data) {
     const key=JSON.stringify(data);
     if(key===squadKey)return;
+    const incoming=data.invites.some(invite=>!squadState.invites.some(previous=>previous.squad===invite.squad));
     squadKey=key;
     squadState=data;
     renderInboxCount();
-    renderSquad();
-    if(section==='friends'&&!activeRoom)renderFriends(lastFriends);
+    if(incoming&&!$('lobby').hidden&&!dialog.open)squadPanel.open=true;
+    renderLobbySquad();
+    if(dialog.open&&section==='friends'&&!activeRoom)renderFriends(lastFriends);
     onSquad(data);
   }
 
@@ -128,58 +145,95 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     finally{squadBusy=false;}
   }
 
-  async function squadAction(action,body) {
-    try{
-      const result=await changeSquad(action,body);
-      if(result)status('');
-      return result;
-    }catch(error){
-      status(error.message);
-    }
-  }
-
-  function squadButton(label,handler) {
-    const button=element('button',label,'secondary');
+  function actionButton(label,handler,primary=false) {
+    const button=element('button',label,primary?'secondary social-primary':'secondary');
     button.type='button';
-    button.onclick=handler;
+    button.onclick=async ()=>{
+      button.disabled=true;
+      try{await handler();}
+      finally{button.disabled=false;}
+    };
     return button;
   }
 
-  function renderSquad() {
-    $('squadGuest').hidden=Boolean(current);
-    $('squadMember').hidden=!current;
-    const {party,invites}=squadState;
-    const me=party?.members.find(member=>member.handle===current?.handle);
-    const leader=party?.leader===current?.handle;
-    const connecting=party?.match&&!party.match.live;
-    $('squadSummary').textContent=party
-      ?connecting?'Connecting your squad…':leader?'Pick a Quick Play mode in the lobby. Queue when your squad is ready.':'Ready up when you’re in the lobby.'
-      :'Create a squad or accept an invite from a friend.';
-    $('squadInvites').replaceChildren(...invites.map(invite=>{
-      const row=element('div','','hub-person');
-      row.append(element('span',invite.name+' invited you to a squad','hub-name'),
-        squadButton('Accept',()=>squadAction('accept',{squad:invite.squad})),
-        squadButton('Decline',()=>squadAction('decline',{squad:invite.squad})));
-      return row;
-    }));
-    $('squadRoster').replaceChildren(...(party?.members??[]).map(member=>
-      element('div',`${member.name} · @${member.handle} · ${member.handle===party.leader?'Leader':member.ready?'Ready':'Not ready'}`,'hub-person')));
-    const actions=$('squadActions');
-    actions.replaceChildren();
-    if(!party){
-      actions.append(squadButton('Create squad',()=>squadAction('create')));
-      return;
+  function personRow(name,detail,actions=[],className='') {
+    const row=element('div','','hub-person'+(className?' '+className:''));
+    const identity=element('div','','hub-person-identity');
+    identity.append(element('strong',name,'hub-name'));
+    if(detail)identity.append(element('span',detail,'hub-person-detail'));
+    row.append(identity);
+    if(actions.length){
+      const controls=element('div','','hub-person-actions');
+      controls.append(...actions);
+      row.append(controls);
     }
-    if(!connecting&&leader)actions.append(squadButton('Invite friends',()=>select('friends')));
-    if(!connecting&&me&&!leader)actions.append(squadButton(me.ready?'Not ready':'Ready up',()=>squadAction('ready',{ready:!me.ready})));
-    if(party.match?.canRejoin&&!$('lobby').hidden)actions.append(squadButton('Rejoin squad match',()=>rejoinSquad(party.match)));
-    actions.append(squadButton('Leave squad',()=>squadAction('leave')));
+    return row;
+  }
+
+  function canInvite(friend) {
+    const {party}=squadState;
+    return friend.status==='friend'&&!party?.members.some(member=>member.handle===friend.handle)
+      &&(!party||(party.leader===current?.handle&&party.members.length<4&&(!party.match||party.match.live)));
+  }
+
+  function inviteButton(friend,report) {
+    if(squadState.sent?.includes(friend.handle))return element('span','Invite sent','hub-person-state');
+    return actionButton('Invite',async()=>{
+      try{
+        if(await changeSquad('invite',{handle:friend.handle}))report('');
+      }catch(error){report(error.message);}
+    },true);
+  }
+
+  async function runSquadAction(action,body) {
+    try{
+      if(await changeSquad(action,body))lobbyStatus('');
+    }catch(error){lobbyStatus(error.message);}
+  }
+
+  function renderLobbySquad() {
+    squadPanel.hidden=!current;
+    if(!current)return;
+    const {party,invites}=squadState;
+    const leader=party?.leader===current.handle;
+    const connecting=party?.match&&!party.match.live;
+    const requests=lastFriends.filter(friend=>friend.status==='received');
+    const count=invites.length+requests.length;
+    const badge=$('lobbySquadBadge');
+    badge.hidden=count===0;
+    badge.textContent=String(count);
+    badge.setAttribute('aria-label',count+' pending invitations or requests');
+    $('lobbySquadCaption').textContent=connecting?'Connecting…':party?party.members.length+' / 4 players':'Invite friends';
+    $('lobbySquadChips').replaceChildren(...(party?.members??[]).filter(member=>member.handle!==current.handle)
+      .map(member=>element('span',member.name,'squad-chip')));
+    $('lobbySquadInvites').replaceChildren(
+      ...invites.map(invite=>personRow(invite.name,'Squad invite',[
+        actionButton('Join squad',()=>runSquadAction('accept',{squad:invite.squad}),true),
+        actionButton('Decline',()=>runSquadAction('decline',{squad:invite.squad}))
+      ],'hub-incoming')),
+      ...requests.map(friend=>friendRow(friend,lobbyStatus,true))
+    );
+    $('lobbySquadRoster').replaceChildren(...(party?.members??[]).map(member=>personRow(
+      member.name,
+      (member.handle===current.handle?'You · ':'')+(member.handle===party.leader?'Squad leader':'@'+member.handle)
+    )));
+    $('lobbySquadHint').textContent=connecting?'Keep this lobby open while your squad connects.':
+      leader&&party.members.length>1?'Pick a mode and press Squad Quick Play.':
+      party&&!leader?'Stay in this lobby. Your squad leader starts the match.':'Invite a friend to play Quick Play together.';
+    const actions=$('lobbySquadActions');
+    actions.replaceChildren();
+    if(party?.match?.canRejoin)actions.append(actionButton('Rejoin match',()=>rejoinSquad(party.match),true));
+    if(party)actions.append(actionButton('Leave squad',()=>runSquadAction('leave')));
+    const friends=lastFriends.filter(canInvite);
+    $('lobbySquadFriends').replaceChildren(...(friends.length?[
+      element('h3','Invite friends','lobby-squad-title'),
+      ...friends.map(friend=>personRow(friend.name,'@'+friend.handle,[inviteButton(friend,lobbyStatus)]))
+    ]:[]));
   }
 
   async function pollSquad() {
     if(!session||squadBusy||($('lobby').hidden&&!dialog.open))return;
-    const ready=squadState.party?.members.some(member=>member.handle===current?.handle&&member.ready);
-    if(document.hidden&&!ready&&!squadState.party?.match)return;
+    if(document.hidden&&!squadState.party)return;
     try{await updateSquad();}catch(error){if(error.status===401)endSession();}
   }
 
@@ -191,6 +245,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     target.replaceChildren();
     $('hubRetryGoogle').hidden=true;
     $('hubGoogleHelp').hidden=true;
+    $('hubGoogleLoading').hidden=false;
     try{
       const {googleClientId}=await api('sign-in-options');
       if(!active())return;
@@ -226,14 +281,18 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
           }
         }
       });
-      google.renderButton(target,{theme:'outline',size:'large',text:'signin_with',shape:'rectangular'});
-      $('hubGoogleHelp').hidden=false;
+      google.renderButton(target,{
+        theme:'outline_dark',size:'large',text:'continue_with',shape:'pill',logo_alignment:'left',
+        width:String(Math.floor(Math.min(320,target.clientWidth)))
+      });
     }catch(error){
       if(active()){
         status(error.message);
         $('hubGoogleHelp').hidden=false;
         $('hubRetryGoogle').hidden=false;
       }
+    }finally{
+      if(active())$('hubGoogleLoading').hidden=true;
     }
   }
 
@@ -241,6 +300,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     session = null;
     write('localStorage',SESSION,null);
     setProfile(null);
+    if(dialog.open&&!activeRoom&&section==='friends')select('profile');
   }
 
   function renderStats(rows) {
@@ -279,62 +339,68 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     }));
   }
 
-  function renderFriends(friends) {
+  function setFriends(friends) {
+    if(JSON.stringify(friends)===JSON.stringify(lastFriends))return;
     lastFriends=friends;
     friendRequests=friends.filter(friend=>friend.status==='received').length;
     renderInboxCount();
-    const list = $('hubFriendsList');
-    if(!friends.length){
-      list.replaceChildren(element('p','Add a friend by their exact @handle.','hub-empty'));
-      return;
+    renderLobbySquad();
+    if(dialog.open&&section==='friends')renderFriends(friends);
+  }
+
+  async function pollFriends() {
+    if(!session||document.hidden||($('lobby').hidden&&!dialog.open))return;
+    const activeSession=session;
+    const version=friendsVersion;
+    try{
+      const {friends}=await api('friends');
+      if(session===activeSession&&version===friendsVersion)setFriends(friends);
+    }catch(error){
+      if(session===activeSession&&error.status===401)endSession();
     }
-    list.replaceChildren(...friends.map(friend => {
-      const row = element('div','','hub-person');
-      const label = {friend:'Friend',received:'Incoming request',sent:'Request sent'}[friend.status];
-      row.append(element('span',`${friend.name} · @${friend.handle} · ${label}`,'hub-name'));
-      const action = (name,kind) => {
-        const button = element('button',name,'secondary');
-        button.type = 'button';
-        button.onclick = async () => {
-          button.disabled = true;
-          try{
-            const result = await api('friends','POST',{handle:friend.handle,action:kind});
-            renderFriends(result.friends);
-            status('');
-          }catch(error){status(error.message);}
-          finally{button.disabled = false;}
-        };
-        row.append(button);
-      };
-      if(friend.status==='received')action('Accept','accept');
-      const party=squadState.party;
-      if(friend.status==='friend'&&!activeRoom&&(!party||(party.leader===current?.handle&&party.members.length<4))){
-        row.append(squadButton('Squad invite',async()=>{
-          if(!squadState.party&&!await squadAction('create'))return;
-          if(await squadAction('invite',{handle:friend.handle}))status('Squad invite sent.');
-        }));
-      }
-      if(friend.status==='friend'&&activeRoom){
-        const invite=element('button','Invite','secondary');
-        invite.type='button';
-        invite.onclick=async()=>{
-          invite.disabled=true;
-          try{await api('invites','POST',{handle:friend.handle,code:activeRoom});status('Room invite sent.');}
-          catch(error){status(error.message);}
-          finally{invite.disabled=false;}
-        };
-        row.append(invite);
-      }
-      action(friend.status==='friend'?'Remove':friend.status==='received'?'Decline':'Cancel','remove');
-      return row;
-    }));
+  }
+
+  async function changeFriend(handle,action,report) {
+    const activeSession=session;
+    friendsVersion++;
+    try{
+      const {friends}=await api('friends','POST',{handle,action});
+      if(session!==activeSession)return false;
+      setFriends(friends);
+      report(action==='request'?'Friend request sent.':'');
+      return true;
+    }catch(error){report(error.message);return false;}
+    finally{friendsVersion++;}
+  }
+
+  function friendRow(friend,report,lobby=false) {
+    const label={friend:'',received:'Friend request',sent:'Request sent'}[friend.status];
+    const actions=[];
+    if(friend.status==='received')actions.push(
+      actionButton('Accept',()=>changeFriend(friend.handle,'accept',report),true)
+    );
+    if(friend.status==='friend'&&activeRoom&&!lobby){
+      actions.push(actionButton('Invite to room',async()=>{
+        try{await api('invites','POST',{handle:friend.handle,code:activeRoom});report('Room invite sent.');}
+        catch(error){report(error.message);}
+      },true));
+    }else if(canInvite(friend)){
+      actions.push(inviteButton(friend,report));
+    }
+    actions.push(actionButton(friend.status==='friend'?'Remove':friend.status==='received'?'Decline':'Cancel',
+      ()=>changeFriend(friend.handle,'remove',report)));
+    return personRow(friend.name,['@'+friend.handle,label].filter(Boolean).join(' · '),actions);
+  }
+
+  function renderFriends(friends) {
+    $('hubFriendsList').replaceChildren(...(friends.length?friends.map(friend=>friendRow(friend,status)):
+      [element('p','Add a friend by their @handle.','hub-empty')]));
   }
 
   function renderInvites(invites) {
     roomInvites=invites.length;
     renderInboxCount();
     $('hubInvites').replaceChildren(...invites.map(invite=>{
-      const row=element('div','','hub-person');
       const join=element('button','Join room','secondary');
       const dismiss=element('button','Dismiss','secondary');
       join.type=dismiss.type='button';
@@ -350,14 +416,14 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
         }catch(error){status(error.message);}
         finally{dismiss.disabled=false;}
       };
-      row.append(element('span',`${invite.name} · room invite`,'hub-name'),join,dismiss);
-      return row;
+      return personRow(invite.name,'Room invite',[join,dismiss],'hub-incoming');
     }));
   }
 
   async function refresh() {
     const activeSession = session;
     if(!activeSession)return;
+    const version=friendsVersion;
     try{
       const data = await api('profile');
       if(session!==activeSession)return;
@@ -366,7 +432,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
       $('hubStanding').textContent=ranked.rating===null?`Ranked placement · ${ranked.played}/${ranked.placements} matches`:
         `Ranked rating ${ranked.rating} · ${ranked.wins} wins`;
       renderStats(data.stats);
-      renderFriends(data.friends);
+      if(version===friendsVersion)setFriends(data.friends);
       renderInvites(data.invites);
     }catch(error){
       if(session!==activeSession)return;
@@ -384,12 +450,9 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
       button.classList.toggle('selected',selected);
       button.setAttribute('aria-pressed',String(selected));
     }
-    for(const name of ['Profile','Friends','Squad','Rankings'])$('hub'+name).hidden = name.toLowerCase()!==tab;
-    if(tab==='squad'){
-      renderSquad();
-      await pollSquad();
-      return;
-    }
+    for(const name of ['Profile','Friends','Rankings'])$('hub'+name).hidden = name.toLowerCase()!==tab;
+    renderSignInOptions();
+    if(tab==='friends')renderFriends(lastFriends);
     if(tab==='rankings'){
       const list=$('hubRankList');
       const kind=$('rankingKind').value;
@@ -429,7 +492,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     write('localStorage',SESSION,session);
     setProfile(data.profile);
     renderStats([]);
-    renderFriends([]);
+    setFriends([]);
     renderInvites([]);
     pollSquad();
   }
@@ -461,19 +524,23 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
     setProfile(profile);
     status('Callsign saved.');
   });
-  form('hubAddFriend',async data=>{
-    const result = await api('friends','POST',{...data,action:'request'});
-    $('hubAddFriend').reset();
-    renderFriends(result.friends);
-    status('Friend request sent.');
-  });
+  for(const [id,report] of [['hubAddFriend',status],['lobbyAddFriend',lobbyStatus]]){
+    const node=$(id);
+    node.onsubmit=async event=>{
+      event.preventDefault();
+      const submit=node.querySelector('button');
+      submit.disabled=true;
+      try{
+        if(await changeFriend(node.elements.handle.value,'request',report))node.reset();
+      }finally{submit.disabled=false;}
+    };
+  }
 
   $('hubSignOut').onclick = async () => {
     try{
       await api('sign-out','POST');
       endSession();
-      status('Signed out. Guest play is available.');
-      prepareGoogle();
+      select('profile');
     }catch(error){
       if(error.status===401)endSession();
       status(error.message);
@@ -481,9 +548,6 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   };
   function open(room = null,tab='profile'){
     activeRoom=room;
-    for(const button of dialog.querySelectorAll('[data-hub-tab]')){
-      button.hidden=Boolean(room)&&button.dataset.hubTab!=='friends';
-    }
     if(!dialog.open)dialog.showModal();
     clearInterval(inboxTimer);
     select(room?'friends':tab);
@@ -491,6 +555,20 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   }
   $('openPlayerHub').onclick = () => open();
   $('hubContinueGuest').onclick=()=>dialog.close();
+  $('hubGuestRankings').onclick=()=>select('rankings');
+  $('lobbyManageFriends').onclick=()=>open(null,'friends');
+  document.addEventListener('click',event=>{
+    if(squadPanel.open&&!squadPanel.contains(event.target))squadPanel.open=false;
+  },true);
+  squadPanel.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!squadPanel.open)return;
+    squadPanel.open=false;
+    squadPanel.querySelector('summary').focus();
+  });
+  squadPanel.addEventListener('toggle',()=>{
+    if(squadPanel.open){pollFriends();pollSquad();}
+    else lobbyStatus('');
+  });
   $('rankingKind').onchange=()=>select('rankings');
   $('closePlayerHub').onclick = () => dialog.close();
   dialog.addEventListener('close',()=>{
@@ -502,6 +580,7 @@ export function createPlayerHub(origin, onProfile, joinRoom, onSquad, rejoinSqua
   refresh();
   pollSquad();
   setInterval(pollSquad,2500);
+  setInterval(pollFriends,6000);
   setInterval(()=>{
     if(session&&!dialog.open&&!document.hidden&&!$('lobby').hidden)refresh();
   },30_000);
