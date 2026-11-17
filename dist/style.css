@@ -100,7 +100,8 @@ body:has(#pause:not([hidden])) #hud{visibility:hidden}.dialog,#matchStandings{co
   border-radius: 8px;
   background: #101d1a;
 }
-#hubGoogleButton { width: min(320px, 100%); text-align: center; }
+/* Match the Google frame’s color scheme so its transparent edges stay transparent. */
+#hubGoogleButton { width: min(320px, 100%); color-scheme: light; text-align: center; }
 #hubGoogleLoading { position: absolute; color: #bacbbb; font-size: 13px; }
 .hub-google #hubGoogleHelp { margin: 8px 0; font-size: 12px; }
 .hub-guest-links {
